@@ -1,5 +1,7 @@
 # KeroTrack - Domestic Heating Oil Monitoring
 
+![logo](assets/logo.png)
+
 KeroTrack monitors domestic heating oil (kerosene in the UK) levels by receiving data from a Watchman Sonic ultrasonic transmitter using a LilyGO LoRa32. It's designed to run efficiently inside an Alpine Linux LXC container on Proxmox.
 
 The project is named KeroTrack because it tracks and monitors the kerosene fuel used for central heating and hot water.
@@ -13,6 +15,8 @@ Cursor has given me the opportunity to apply my experience in a new way — mayb
 ## Overview
 
 The Watchman Sonic transmits data about oil levels in domestic heating oil tanks, the data consists of a depth (in cm) which is from the top of the tank (Where the sensor is) and to the surface of the oil, so it's measuring the air gap it also includes temperature. This data is received by a LilyGO LoRa32 device running OpenMQTTGateway, which publishes the readings to MQTT. The system then processes this data for comprehensive analysis, including consumption forecasting, efficiency tracking, and environmental impact assessment. A web interface provides real-time monitoring and analysis of the oil tank data.
+
+![Dashboard Screenshot](assets/dashboard-dark.png)
 
 ## Features
 
