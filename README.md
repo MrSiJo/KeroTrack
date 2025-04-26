@@ -1,6 +1,6 @@
-# KeroTrack - Domestic Heating Oil Monitoring
-
 ![logo](assets/logo.png)
+
+# KeroTrack - Domestic Heating Oil Monitoring
 
 KeroTrack monitors domestic heating oil (kerosene in the UK) levels by receiving data from a Watchman Sonic ultrasonic transmitter using a LilyGO LoRa32. It's designed to run efficiently inside an Alpine Linux LXC container on Proxmox.
 
