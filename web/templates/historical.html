@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+
+{% block title %}Oil Monitor - Historical Data{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center">
+                    <h5 class="card-title mb-0">
+                        <i class="fas fa-chart-line me-2"></i>Historical Data
+                    </h5>
+                    <div class="btn-group">
+                        <a href="?days=7" class="btn btn-sm {% if selected_days == '7' %}btn-primary{% else %}btn-outline-primary{% endif %}">7 Days</a>
+                        <a href="?days=30" class="btn btn-sm {% if selected_days == '30' %}btn-primary{% else %}btn-outline-primary{% endif %}">30 Days</a>
+                        <a href="?days=90" class="btn btn-sm {% if selected_days == '90' %}btn-primary{% else %}btn-outline-primary{% endif %}">90 Days</a>
+                        <a href="?days=365" class="btn btn-sm {% if selected_days == '365' %}btn-primary{% else %}btn-outline-primary{% endif %}">1 Year</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if graphs %}
+<!-- Oil Level Graph -->
+<div class="row mb-4">
+    <div class="col">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-oil-can me-2"></i>Oil Level History
+                </h5>
+                <div id="level-graph" class="mt-3"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="row">
+    <div class="col">
+        <div class="alert alert-warning">
+            <i class="fas fa-exclamation-triangle me-2"></i>No historical data available for the selected period
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    {% if graphs %}
+    try {
+        const graphConfigs = [
+            {
+                rawJson: '{{ graphs.level|safe }}',
+                elementId: 'level-graph'
+            }
+        ];
+
+        function applyThemeToPlotly(theme, elementId) {
+            const isDark = theme === 'dark';
+            const layoutUpdate = {
+                paper_bgcolor: isDark ? 'rgba(10, 42, 65, 0.7)' : '#ffffff',
+                plot_bgcolor: isDark ? 'rgba(10, 42, 65, 0.7)' : '#ffffff',
+                font: {
+                    color: isDark ? '#fdfffc' : '#212529'
+                },
+                xaxis: {
+                    gridcolor: isDark ? 'rgba(253, 255, 252, 0.1)' : 'rgba(0,0,0,0.1)',
+                    zerolinecolor: isDark ? 'rgba(253, 255, 252, 0.1)' : 'rgba(0,0,0,0.1)',
+                    linecolor: isDark ? 'rgba(253, 255, 252, 0.1)' : 'rgba(0,0,0,0.1)',
+                    tickfont: { color: isDark ? '#fdfffc' : '#212529' }
+                },
+                yaxis: {
+                    gridcolor: isDark ? 'rgba(253, 255, 252, 0.1)' : 'rgba(0,0,0,0.1)',
+                    zerolinecolor: isDark ? 'rgba(253, 255, 252, 0.1)' : 'rgba(0,0,0,0.1)',
+                    linecolor: isDark ? 'rgba(253, 255, 252, 0.1)' : 'rgba(0,0,0,0.1)',
+                    tickfont: { color: isDark ? '#fdfffc' : '#212529' }
+                }
+            };
+            try {
+                Plotly.update(elementId, {}, layoutUpdate);
+            } catch (updateError) {
+                console.warn(`Plotly.update failed for ${elementId}, trying Plotly.react: ${updateError}`);
+                Plotly.relayout(elementId, layoutUpdate);
+            }
+        }
+
+        // Initialize graphs and apply initial theme
+        const initialTheme = document.documentElement.getAttribute('data-theme') || 'light';
+        graphConfigs.forEach(config => {
+            try {
+                const graphData = JSON.parse(config.rawJson);
+                console.log(`Initializing Plotly graph ${config.elementId} with data:`, graphData);
+                
+                if (!graphData || !graphData.data || !graphData.layout) {
+                     console.error(`Invalid graph data structure for ${config.elementId}:`, graphData);
+                     return;
+                }
+
+                Plotly.newPlot(config.elementId, graphData.data, graphData.layout);
+                applyThemeToPlotly(initialTheme, config.elementId);
+            } catch (plotError) {
+                 console.error(`Error initializing graph ${config.elementId}:`, plotError, "Raw JSON:", config.rawJson);
+            }
+        });
+
+        // Make graphs responsive
+        window.addEventListener('resize', function() {
+            graphConfigs.forEach(config => {
+                 try {
+                     Plotly.Plots.resize(config.elementId);
+                 } catch (resizeError) {
+                     console.error(`Error resizing graph ${config.elementId}:`, resizeError);
+                 }
+            });
+        });
+        
+        // Use MutationObserver to detect theme changes for all graphs
+        const observer = new MutationObserver(mutations => {
+            mutations.forEach(mutation => {
+                if (mutation.type === 'attributes' && mutation.attributeName === 'data-theme') {
+                    const newTheme = document.documentElement.getAttribute('data-theme');
+                    graphConfigs.forEach(config => {
+                         try {
+                             applyThemeToPlotly(newTheme, config.elementId);
+                         } catch (themeError) {
+                            console.error(`Error applying theme to graph ${config.elementId}:`, themeError);
+                         }
+                    });
+                }
+            });
+        });
+        observer.observe(document.documentElement, { attributes: true });
+
+    } catch (e) {
+        console.error('General error processing graphs:', e);
+    }
+    {% endif %}
+});
+</script>
+{% endblock %} 

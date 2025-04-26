@@ -1,0 +1,152 @@
+mqtt:
+  sensor:
+  # oil levels
+    - name: "Oil Tank - Temperature"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.temperature }}"
+      unit_of_measurement: "°C"
+
+    - name: "Oil Tank - Litres Remaining"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.litres_remaining }}"
+      unit_of_measurement: "litres"
+
+    - name: "Oil Tank - Litres Used Since Last"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.litres_used_since_last }}"
+      unit_of_measurement: "litres"
+
+    - name: "Oil Tank - Litres to Order"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.litres_to_order }}"
+      unit_of_measurement: "litres"
+
+    - name: "Oil Tank - Percentage Remaining"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.percentage_remaining }}"
+      unit_of_measurement: "%"
+
+    - name: "Oil Tank - Bars Remaining"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.bars_remaining }}"
+      unit_of_measurement: "bars"
+
+    - name: "Oil Tank - Depth"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.oil_depth_cm }}"
+      unit_of_measurement: "cm"
+
+    - name: "Oil Tank - Air Gap"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.air_gap_cm }}"
+      unit_of_measurement: "cm"
+
+    - name: "Oil Tank - Current Price Per Litre"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.current_ppl }}"
+      unit_of_measurement: "pence"
+
+    - name: "Oil Tank - Cost Used"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.cost_used }}"
+      unit_of_measurement: "£"
+
+    - name: "Oil Tank - Cost to Fill"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.cost_to_fill }}"
+      unit_of_measurement: "£"
+
+    - name: "Oil Tank - Heating Degree Days"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.heating_degree_days }}"
+      unit_of_measurement: "HDD"
+
+    - name: "Oil Tank - Seasonal Efficiency"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.seasonal_efficiency }}"
+      unit_of_measurement: "%"
+
+    - name: "Oil Tank - Refill Detected"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.refill_detected }}"
+
+    - name: "Oil Tank - Leak Detected"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.leak_detected }}"
+
+    - name: "Oil Tank - Last Update"
+      state_topic: "oiltank/level"
+      value_template: "{{ value_json.date }}"
+
+  # Oil analysis
+    - name: "Oil Tank - Last Analysis Date"
+      state_topic: "oiltank/analysis"
+      value_template: "{{ value_json.latest_analysis_date }}"
+
+    - name: "Oil Tank - Days Since Refill"
+      state_topic: "oiltank/analysis"
+      value_template: "{{ value_json.days_since_refill }}"
+      unit_of_measurement: "days"
+
+    - name: "Oil Tank - Total Consumption Since Refill"
+      state_topic: "oiltank/analysis"
+      value_template: "{{ value_json.total_consumption_since_refill }}"
+      unit_of_measurement: "L"
+
+    - name: "Oil Tank - Average Daily Consumption"
+      state_topic: "oiltank/analysis"
+      value_template: "{{ value_json.avg_daily_consumption_l }}"
+      unit_of_measurement: "L/day"
+
+    - name: "Oil Tank - Estimated Days Remaining"
+      state_topic: "oiltank/analysis"
+      value_template: >
+        {% set days = value_json.estimated_days_remaining | float %}
+        {% if days > 0 %}
+          {{ days }}
+        {% else %}
+          {{ 'Error: ' ~ value_json.estimated_days_remaining }}
+        {% endif %}
+      unit_of_measurement: "days"
+
+    - name: "Oil Tank - Estimated Empty Date"
+      state_topic: "oiltank/analysis"
+      value_template: "{{ value_json.estimated_empty_date }}"
+
+    - name: "Oil Tank - Consumption per HDD"
+      state_topic: "oiltank/analysis"
+      value_template: "{{ value_json.consumption_per_hdd_l }}"
+      unit_of_measurement: "L/HDD"
+
+    - name: "Oil Tank - Upcoming Month HDD"
+      state_topic: "oiltank/analysis"
+      value_template: "{{ value_json.upcoming_month_hdd }}"
+      unit_of_measurement: "HDD"
+
+    - name: "Oil Tank - Estimated Daily Consumption (HDD)"
+      state_topic: "oiltank/analysis"
+      value_template: "{{ value_json.estimated_daily_consumption_hdd_l }}"
+      unit_of_measurement: "L/day"
+
+    - name: "Oil Tank - Estimated Daily Hot Water Consumption"
+      state_topic: "oiltank/analysis"
+      value_template: "{{ value_json.estimated_daily_hot_water_consumption_l }}"
+      unit_of_measurement: "L/day"
+
+    - name: "Oil Tank - Estimated Daily Heating Consumption"
+      state_topic: "oiltank/analysis"
+      value_template: "{{ value_json.estimated_daily_heating_consumption_l }}"
+      unit_of_measurement: "L/day"
+
+    - name: "Oil Tank - Seasonal Heating Factor"
+      state_topic: "oiltank/analysis"
+      value_template: "{{ value_json.seasonal_heating_factor }}"
+
+    - name: "Oil Tank - Remaining Days Until Empty (HDD)"
+      state_topic: "oiltank/analysis"
+      value_template: "{{ value_json.remaining_days_empty_hdd }}"
+      unit_of_measurement: "days"
+
+    - name: "Oil Tank - Estimated Empty Date (HDD)"
+      state_topic: "oiltank/analysis"
+      value_template: "{{ value_json.remaining_date_empty_hdd }}" 

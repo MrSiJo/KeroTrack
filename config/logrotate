@@ -1,0 +1,7 @@
+/opt/KeroTrack/logs/fetch_oil_*.log {
+    daily
+    rotate 7
+    compress
+    missingok
+    notifempty
+} 

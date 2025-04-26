@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Edit Analysis Record</h2>
+    <h5 class="text-muted">Date: {{ record.latest_reading_date }}</h5>
+    
+    <form method="POST" class="mt-4">
+        <div class="row">
+            <div class="col-md-6">
+                <div class="mb-3">
+                    <label for="avg_daily_consumption_l" class="form-label">Daily Consumption (L)</label>
+                    <input type="number" step="0.1" class="form-control" id="avg_daily_consumption_l" name="avg_daily_consumption_l" 
+                           value="{{ "%.1f"|format(record.avg_daily_consumption_l) }}" required>
+                </div>
+                
+                <div class="mb-3">
+                    <label for="estimated_days_remaining" class="form-label">Estimated Days Remaining</label>
+                    <input type="number" step="0.1" class="form-control" id="estimated_days_remaining" name="estimated_days_remaining"
+                           value="{{ "%.1f"|format(record.estimated_days_remaining) if record.estimated_days_remaining is not string else "" }}">
+                </div>
+                
+                <div class="mb-3">
+                    <label for="estimated_empty_date" class="form-label">Estimated Empty Date</label>
+                    <input type="text" class="form-control" id="estimated_empty_date" name="estimated_empty_date"
+                           value="{{ record.estimated_empty_date }}">
+                </div>
+                
+                <div class="mb-3">
+                    <label for="consumption_per_hdd_l" class="form-label">Consumption per HDD (L)</label>
+                    <input type="number" step="0.001" class="form-control" id="consumption_per_hdd_l" name="consumption_per_hdd_l"
+                           value="{{ "%.3f"|format(record.consumption_per_hdd_l) }}">
+                </div>
+                
+                <div class="mb-3">
+                    <label for="upcoming_month_hdd" class="form-label">Upcoming Month HDD</label>
+                    <input type="number" step="0.1" class="form-control" id="upcoming_month_hdd" name="upcoming_month_hdd"
+                           value="{{ "%.1f"|format(record.upcoming_month_hdd) }}">
+                </div>
+            </div>
+            
+            <div class="col-md-6">
+                <div class="mb-3">
+                    <label for="estimated_daily_consumption_hdd_l" class="form-label">Daily Consumption HDD (L)</label>
+                    <input type="number" step="0.01" class="form-control" id="estimated_daily_consumption_hdd_l" name="estimated_daily_consumption_hdd_l"
+                           value="{{ "%.2f"|format(record.estimated_daily_consumption_hdd_l) }}">
+                </div>
+                
+                <div class="mb-3">
+                    <label for="estimated_daily_hot_water_consumption_l" class="form-label">Daily Hot Water (L)</label>
+                    <input type="number" step="0.1" class="form-control" id="estimated_daily_hot_water_consumption_l" name="estimated_daily_hot_water_consumption_l"
+                           value="{{ "%.1f"|format(record.estimated_daily_hot_water_consumption_l) }}">
+                </div>
+                
+                <div class="mb-3">
+                    <label for="estimated_daily_heating_consumption_l" class="form-label">Daily Heating (L)</label>
+                    <input type="number" step="0.1" class="form-control" id="estimated_daily_heating_consumption_l" name="estimated_daily_heating_consumption_l"
+                           value="{{ "%.1f"|format(record.estimated_daily_heating_consumption_l) }}">
+                </div>
+                
+                <div class="mb-3">
+                    <label for="remaining_days_empty_hdd" class="form-label">HDD Days Remaining</label>
+                    <input type="number" step="0.1" class="form-control" id="remaining_days_empty_hdd" name="remaining_days_empty_hdd"
+                           value="{{ "%.1f"|format(record.remaining_days_empty_hdd) if record.remaining_days_empty_hdd is not string else "" }}">
+                </div>
+                
+                <div class="mb-3">
+                    <label for="remaining_date_empty_hdd" class="form-label">HDD Empty Date</label>
+                    <input type="text" class="form-control" id="remaining_date_empty_hdd" name="remaining_date_empty_hdd"
+                           value="{{ record.remaining_date_empty_hdd }}">
+                </div>
+            </div>
+        </div>
+        
+        <div class="mt-4">
+            <button type="submit" class="btn btn-primary">Save Changes</button>
+            <a href="{{ url_for('analysis_records', page=page) }}" class="btn btn-secondary ms-2">Cancel</a>
+        </div>
+    </form>
+</div>
+
+<!-- Flash Messages -->
+{% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+        {% for category, message in messages %}
+            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                {{ message }}
+                <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+            </div>
+        {% endfor %}
+    {% endif %}
+{% endwith %}
+{% endblock %} 

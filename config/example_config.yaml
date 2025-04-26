@@ -1,0 +1,74 @@
+database:
+  path: data/KeroTrack_data.db   # Path to the SQLite database file
+  cleanup_days: 700              # Number of days to keep data before cleanup
+
+logging:
+  directory: /opt/KeroTrack/logs # Directory for log files  
+  level: INFO                    # Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
+  retention_days: 7              # Number of days to keep log files
+
+web:
+  secret_key: "your-secret-key-here"  # Generate a random secure key for Flask sessions
+  host: "0.0.0.0"                     # Host to bind the web server (0.0.0.0 = all interfaces)
+  port: 5000                          # Port for the web interface
+
+analysis:
+  co2_per_liter: 2.54                   # CO2 emissions per liter of heating oil (kg)
+  hdd_base_temperature: 15.5            # Base temperature for heating degree days calculation (°C)
+  reference_temperature: 15.0           # Reference temperature for oil density calculation (°C)
+  thermal_expansion_coefficient: 0.0008  # Thermal expansion coefficient of heating oil (per °C)
+  oil_density_at_15c: 800               # Density of heating oil at 15°C (kg/m³)
+  viscosity_at_40c: 1.5                 # Oil viscosity at 40°C (mm²/s)
+  tank_material_conductivity: 0.4       # Thermal conductivity of tank material (W/m·K)
+  tank_wall_thickness: 0.005            # Thickness of tank wall (m)
+  oil_specific_heat: 2000               # Specific heat capacity of oil (J/kg·K)
+  ema_alpha: 0.2                        # Alpha parameter for exponential moving average calculations
+
+alerts:
+  low_level_threshold: 20.0             # Percentage threshold for low level alerts
+
+currency:
+  symbol: "£"                           # Currency symbol for financial calculations
+
+tank:
+  capacity: 1225                        # Total tank capacity in liters
+  length: 178.5                         # Tank length in cm
+  width: 75                             # Tank width in cm
+  height: 137                           # Tank height in cm
+  thermal_coefficient: 0.0007           # Thermal expansion coefficient of tank material
+
+boiler:
+  model: "Your Boiler Model"            # Make and model of your boiler
+  burner: "Your Burner Model"           # Burner model
+  nozzle: 0.60                          # Nozzle size (gallons per hour)
+  fuel_rate: 2.33                       # Fuel consumption rate (kg/h)
+  co2_percentage: 11.8                  # CO2 percentage in exhaust gases
+  input_kw: 22.1                        # Input power (kW)
+  output_kw: 21.5                       # Output power (kW)
+  fuel_pump_pressure: 140               # Fuel pump pressure (PSI)
+  efficiency: 99                        # Boiler efficiency (%)
+
+detection:
+  refill_threshold: 100                 # Minimum volume increase to detect a refill (liters)
+  leak_threshold: 100                   # Minimum unexpected volume decrease to detect a leak (liters)
+  max_daily_consumption_cold: 55        # Maximum expected daily consumption in cold weather (liters)
+  max_daily_consumption_warm: 30        # Maximum expected daily consumption in warm weather (liters)
+  warm_temperature_threshold: 16        # Temperature threshold to determine warm/cold weather (°C)
+  leak_detection_period_days: 3         # Number of days to monitor for leak detection
+
+mqtt:
+  broker: "your-mqtt-broker-ip"         # MQTT broker IP address or hostname
+  port: 1883                            # MQTT broker port
+  username: "mqtt-username"             # MQTT username (if authentication is required)
+  password: "mqtt-password"             # MQTT password (if authentication is required)
+  timeout_minutes: 35                   # Connection timeout in minutes
+  broadcast_interval_minutes: 30        # Interval for broadcasting data over MQTT
+  topics:
+    - name: "KTreadings"                # Friendly name for the topic
+      topicname: "oiltank/level"        # MQTT topic for oil tank level readings
+      qos: 0                            # Quality of Service level (0, 1, or 2)
+    - name: "KTanalytics"               # Friendly name for analytics topic
+      topicname: "oiltank/analytics"    # MQTT topic for analytics data
+      qos: 0                            # Quality of Service level
+    - name: "sensor/readings"           # Example external sensor topic
+      qos: 0                            # Quality of Service level 

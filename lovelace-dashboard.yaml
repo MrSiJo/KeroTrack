@@ -1,0 +1,98 @@
+title: Oil Tank Monitoring
+views:
+  - title: Oil Tank
+    path: oil-tank
+    icon: mdi:oil
+    badges: []
+    cards:
+      - type: gauge
+        name: Oil Level
+        entity: sensor.oil_tank_percentage_remaining
+        min: 0
+        max: 100
+        severity:
+          green: 50
+          yellow: 25
+          red: 10
+      
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Current Status
+            entities:
+              - entity: sensor.oil_tank_temperature
+                name: Temperature
+              - entity: sensor.oil_tank_litres_remaining
+                name: Litres Remaining
+              - entity: sensor.oil_tank_percentage_remaining
+                name: Percentage Remaining
+              - entity: sensor.oil_tank_bars_remaining
+                name: Bars Remaining
+              - entity: sensor.oil_tank_estimated_days_remaining
+                name: Days Remaining
+              - entity: sensor.oil_tank_estimated_empty_date
+                name: Estimated Empty Date
+          
+          - type: entities
+            title: Cost Information
+            entities:
+              - entity: sensor.oil_tank_current_price_per_litre
+                name: Price per Litre
+              - entity: sensor.oil_tank_cost_to_fill
+                name: Cost to Fill
+              - entity: sensor.oil_tank_cost_used
+                name: Cost Used
+              - entity: sensor.oil_tank_litres_to_order
+                name: Litres to Order
+      
+      - type: history-graph
+        title: Oil Level History
+        entities:
+          - entity: sensor.oil_tank_litres_remaining
+        hours_to_show: 168
+      
+      - type: vertical-stack
+        cards:
+          - type: entities
+            title: Consumption Analysis
+            entities:
+              - entity: sensor.oil_tank_average_daily_consumption
+                name: Daily Consumption
+              - entity: sensor.oil_tank_total_consumption_since_refill
+                name: Total Consumption
+              - entity: sensor.oil_tank_days_since_refill
+                name: Days Since Refill
+              - entity: sensor.oil_tank_estimated_daily_hot_water_consumption
+                name: Daily Hot Water
+              - entity: sensor.oil_tank_estimated_daily_heating_consumption
+                name: Daily Heating
+          
+          - type: entities
+            title: Efficiency & Environment
+            entities:
+              - entity: sensor.oil_tank_seasonal_efficiency
+                name: Seasonal Efficiency
+              - entity: sensor.oil_tank_seasonal_heating_factor
+                name: Heating Factor
+              - entity: sensor.oil_tank_heating_degree_days
+                name: Heating Degree Days
+              - entity: sensor.oil_tank_consumption_per_hdd
+                name: Consumption per HDD
+              - entity: sensor.oil_tank_upcoming_month_hdd
+                name: Upcoming Month HDD
+      
+      - type: entities
+        title: Tank Details
+        entities:
+          - entity: sensor.oil_tank_depth
+            name: Oil Depth
+          - entity: sensor.oil_tank_air_gap
+            name: Air Gap
+          - entity: sensor.oil_tank_refill_detected
+            name: Refill Detected
+          - entity: sensor.oil_tank_leak_detected
+            name: Leak Detected
+          - entity: sensor.oil_tank_last_update
+            name: Last Update
+          - entity: sensor.oil_tank_last_analysis_date
+            name: Last Analysis 

@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block title %}MQTT Topic Viewer - Oil Monitor{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+<style>
+    .topics-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+        gap: 20px;
+        align-items: start;
+        margin-top: 80px; /* Account for fixed navbar */
+    }
+    .topic-container {
+        background: var(--card-bg);
+        border-radius: 8px;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        overflow: hidden;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+    .topic-header {
+        background: var(--navbar-bg);
+        color: var(--text-color);
+        padding: 15px 20px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        border-bottom: 1px solid var(--card-border);
+    }
+    .topic-name {
+        font-size: 1.1em;
+        font-weight: 600;
+        margin: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+    .timestamp {
+        font-size: 0.9em;
+        opacity: 0.9;
+        margin-left: 20px;
+        white-space: nowrap;
+        color: var(--muted-text);
+    }
+    .message-container {
+        padding: 20px;
+        background: #1e1e1e;
+        margin: 0;
+        overflow-x: auto;
+        flex-grow: 1;
+    }
+    pre {
+        margin: 0;
+        min-width: fit-content;
+    }
+    code {
+        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
+        font-size: 14px;
+    }
+    .status-indicator {
+        display: inline-block;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        margin-right: 10px;
+        flex-shrink: 0;
+    }
+    .status-active {
+        background-color: var(--secondary);
+        box-shadow: 0 0 5px var(--secondary);
+    }
+    .status-inactive {
+        background-color: var(--muted-text);
+    }
+    @media (max-width: 1200px) {
+        .topics-grid {
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+        }
+    }
+    @media (max-width: 768px) {
+        .topics-grid {
+            grid-template-columns: 1fr;
+            margin-top: 60px;
+        }
+        .topic-header {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+        .timestamp {
+            margin-left: 18px;
+            margin-top: 5px;
+        }
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="topics-grid">
+        {% for topic, data in topics.items() %}
+        <div class="topic-container" id="topic-{{ topic|replace('/', '-') }}">
+            <div class="topic-header">
+                <div style="display: flex; align-items: center; min-width: 0;">
+                    <span class="status-indicator status-inactive" id="status-{{ topic|replace('/', '-') }}"></span>
+                    <span class="topic-name">{{ topic }}</span>
+                </div>
+                <span class="timestamp" id="timestamp-{{ topic|replace('/', '-') }}">
+                    {% if data.timestamp %}
+                        Last update: {{ data.timestamp }}
+                    {% else %}
+                        Waiting for messages...
+                    {% endif %}
+                </span>
+            </div>
+            <div class="message-container">
+                <pre><code class="language-json" id="message-{{ topic|replace('/', '-') }}">{% if data.payload %}{{ data.payload|tojson(indent=2) }}{% else %}Waiting for data...{% endif %}</code></pre>
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<script>
+    // Initialize Socket.IO
+    const socket = io();
+
+    // Initialize syntax highlighting
+    hljs.highlightAll();
+
+    // Handle incoming MQTT messages
+    socket.on('mqtt_message', function(data) {
+        const topicId = data.topic.replace(/\//g, '-');
+        const messageElement = document.getElementById(`message-${topicId}`);
+        const timestampElement = document.getElementById(`timestamp-${topicId}`);
+        const statusElement = document.getElementById(`status-${topicId}`);
+
+        // Update message content
+        messageElement.textContent = JSON.stringify(data.payload, null, 2);
+        hljs.highlightElement(messageElement);
+
+        // Update timestamp
+        timestampElement.textContent = `Last update: ${data.timestamp}`;
+
+        // Show active status
+        statusElement.className = 'status-indicator status-active';
+        setTimeout(() => {
+            statusElement.className = 'status-indicator status-inactive';
+        }, 1000);
+    });
+
+    // Handle connection status
+    socket.on('connect', function() {
+        console.log('Connected to server');
+    });
+
+    socket.on('disconnect', function() {
+        console.log('Disconnected from server');
+    });
+</script>
+{% endblock %} 

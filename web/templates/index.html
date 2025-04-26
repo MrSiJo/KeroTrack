@@ -1,0 +1,453 @@
+{% extends "base.html" %}
+
+{% block title %}KeroTrack - Home{% endblock %}
+
+{% block styles %}
+<style>
+/* Card Styles */
+.card {
+    background-color: var(--bs-card-bg);
+    border: 1px solid var(--bs-border-color);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+[data-theme='dark'] .card {
+    background-color: rgba(13, 17, 23, 0.3);
+    border-color: rgba(255, 255, 255, 0.1);
+}
+
+.card-title {
+    font-size: 1.2rem;
+    font-weight: 600;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    color: var(--bs-heading-color);
+}
+
+.card-title i {
+    margin-right: 1rem;
+    opacity: 0.8;
+}
+
+/* Progress Bar Styles */
+.progress-container {
+    width: 100%;
+    margin-bottom: 1.5rem;
+}
+
+.progress {
+    height: 1.75rem;
+    background-color: rgba(0, 0, 0, 0.1);
+    border-radius: 1rem;
+    overflow: hidden;
+}
+
+[data-theme='dark'] .progress {
+    background-color: rgba(255, 255, 255, 0.1);
+}
+
+.progress-bar {
+    transition: width 0.5s ease, background-color 0.3s ease;
+    position: relative;
+    overflow: visible;
+    border-radius: 1rem;
+}
+
+.progress-text {
+    position: absolute;
+    right: 1rem;
+    color: #fff;
+    font-weight: 600;
+    line-height: 1.75rem;
+    font-size: 1rem;
+    text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+.progress-low {
+    background-color: #dc3545;
+    animation: pulse 2s infinite;
+}
+
+.progress-medium {
+    background-color: #ffc107;
+}
+
+.progress-good {
+    background-color: #198754;
+}
+
+.progress-normal {
+    background-color: #0d6efd;
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.8; }
+    100% { opacity: 1; }
+}
+
+/* Value Display Styles */
+.value-text {
+    font-size: 1.5rem;
+    font-weight: 600;
+    margin: 0;
+    display: inline-flex;
+    align-items: baseline;
+    color: var(--bs-heading-color);
+}
+
+.label-text {
+    font-size: 0.9rem;
+    color: var(--bs-secondary);
+    margin-left: 0.75rem;
+    font-weight: 500;
+}
+
+.card-content {
+    padding: 1.5rem;
+}
+
+.value-group {
+    display: inline-flex;
+    align-items: baseline;
+    margin-right: 2rem;
+    position: relative;
+}
+
+.value-group i {
+    margin-right: 0.75rem;
+    color: var(--bs-secondary);
+    font-size: 1.1rem;
+    width: 1.5rem;
+    text-align: center;
+}
+
+/* Quick Actions Styles */
+.btn {
+    padding: 0.75rem 1.5rem;
+    font-weight: 500;
+    border-radius: 0.5rem;
+    transition: all 0.2s;
+}
+
+.btn i {
+    margin-right: 0.75rem;
+    width: 1.25rem;
+    text-align: center;
+}
+
+.btn-primary {
+    background-color: #0d6efd;
+    border: none;
+}
+
+.btn-secondary {
+    background-color: #20c997;
+    border: none;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+/* Recent Trend Graph */
+#mini-graph {
+    min-height: 300px;
+    margin: 1rem 0;
+    border-radius: 0.5rem;
+    overflow: hidden;
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    .value-group {
+        margin-right: 1rem;
+        margin-bottom: 1rem;
+    }
+    
+    .value-text {
+        font-size: 1.25rem;
+    }
+}
+
+/* Animation for Updates */
+@keyframes highlight {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+.highlight {
+    animation: highlight 0.5s ease-in-out;
+}
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row">
+    <!-- Card 1: Current Status -->
+    <div class="col-md-4 mb-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-tachometer-alt"></i>Current Status
+                </h5>
+                <div class="progress-container mb-3">
+                    {% set pct = latest_reading.percentage_remaining|float(0) %}
+                    <div class="progress">
+                        <div class="progress-bar {% if pct <= 15 %}progress-low{% elif pct <= 40 %}progress-medium{% else %}progress-good{% endif %}"
+                            style="width: {{ pct }}%"
+                            aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100">
+                            <span class="progress-text">{{ "%.1f"|format(pct) }}%</span>
+                        </div>
+                    </div>
+                </div>
+                {% if latest_reading %}
+                <div class="card-content">
+                    <div class="row align-items-center">
+                        <div class="col-12">
+                            <div class="value-group mb-4">
+                                <i class="fas fa-oil-can"></i>
+                                <h4 class="value-text" data-realtime="litres_remaining">{{ "%.1f"|format(latest_reading.litres_remaining) }}L</h4>
+                                <span class="label-text">remaining</span>
+                            </div>
+                            <div class="value-group">
+                                <i class="fas fa-thermometer-half"></i>
+                                <h4 class="value-text" data-realtime="temperature">{{ "%.1f"|format(latest_reading.temperature) }}°C</h4>
+                                <small class="label-text">temperature</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="alert alert-warning">No current data available</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Card 2: Usage Forecast -->
+    <div class="col-md-4 mb-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-calendar-alt"></i>Usage Forecast
+                </h5>
+                {% if latest_analysis %}
+                <div class="card-content">
+                    <div class="progress-container">
+                        {% set days_remaining = latest_analysis.estimated_days_remaining|int(0) %}
+                        {% set max_days = 100 %}
+                        {% set percentage_days = min(days_remaining / max_days * 100, 100) %}
+                        <div class="progress">
+                            <div class="progress-bar {% if days_remaining <= 30 %}progress-low{% elif days_remaining <= 60 %}progress-medium{% else %}progress-good{% endif %}"
+                                data-realtime="days_remaining"
+                                data-realtime-class="{% if days_remaining <= 30 %}progress-low{% elif days_remaining <= 60 %}progress-medium{% else %}progress-good{% endif %}"
+                                style="width: {{ percentage_days }}%"
+                                aria-valuenow="{{ days_remaining }}"
+                                aria-valuemin="0"
+                                aria-valuemax="{{ max_days }}">
+                                <span class="progress-text" data-realtime="days_remaining_text">{{ days_remaining }} days</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-baseline">
+                        <div class="value-group">
+                            <i class="fas fa-calendar-day"></i>
+                            <small class="label-text me-2">Est. empty date:</small>
+                            <h4 class="value-text" data-realtime="empty_date">{{ latest_analysis.estimated_empty_date.split()[0] }}</h4>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="alert alert-warning">No analysis data available</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- Card 3: Cost Overview -->
+    <div class="col-md-4 mb-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-pound-sign"></i>Cost Overview
+                </h5>
+                {% if latest_reading %}
+                <div class="card-content">
+                    <div class="value-group mb-4">
+                        <i class="fas fa-wallet"></i>
+                        <h4 class="value-text">£{{ "%.2f"|format(remaining_value) }}</h4>
+                        <small class="label-text">remaining value</small>
+                    </div>
+                    <div class="d-flex justify-content-between align-items-baseline">
+                        <div class="value-group">
+                            <i class="fas fa-shopping-cart"></i>
+                            <h4 class="value-text">
+                                {% if latest_reading.cost_to_fill_float is not none %}
+                                    £{{ "%.2f"|format(latest_reading.cost_to_fill_float) }}
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </h4>
+                            <small class="label-text">to fill</small>
+                        </div>
+                        <div class="value-group">
+                            <i class="fas fa-gas-pump"></i>
+                            <h4 class="value-text">
+                                {% if latest_reading and latest_reading.cost_to_fill_float is not none %}
+                                    {{ "%.1f"|format(1200 - latest_reading.litres_remaining) }} L
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </h4>
+                            <small class="label-text">needed</small>
+                        </div>
+                    </div>
+                </div>
+                {% else %}
+                <div class="alert alert-warning">No cost data available</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Trend Card -->
+<div class="row">
+    <div class="col-12 mb-4">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-chart-line"></i>Recent Trend
+                </h5>
+                
+                {% if mini_graph %}
+                <div id="mini-graph" class="mt-3" data-graph="mini_graph"></div>
+                {% else %}
+                <div class="alert alert-warning mt-3">
+                    No trend data available
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Actions Card -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-bolt"></i>Quick Actions
+                </h5>
+                <div class="row mt-3">
+                    <div class="col-md-3 col-sm-6 mb-3">
+                        <a href="/historical" class="btn btn-primary w-100">
+                            <i class="fas fa-history"></i>View History
+                        </a>
+                    </div>
+                    <div class="col-md-3 col-sm-6 mb-3">
+                        <a href="/analysis" class="btn btn-secondary w-100">
+                            <i class="fas fa-calculator"></i>Full Analysis
+                        </a>
+                    </div>
+                    <div class="col-md-3 col-sm-6 mb-3">
+                        <a href="/settings" class="btn btn-primary w-100">
+                            <i class="fas fa-cog"></i>Settings
+                        </a>
+                    </div>
+                    <div class="col-md-3 col-sm-6 mb-3">
+                        <button class="btn btn-secondary w-100" onclick="refreshData()">
+                            <i class="fas fa-sync-alt"></i>Refresh
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    window.refreshData = function() {
+        console.log('Refreshing data...');
+        location.reload();
+    }
+
+    {% if mini_graph %}
+    try {
+        const graphDivId = 'mini-graph';
+        const graphDiv = document.getElementById(graphDivId);
+        const graphData = JSON.parse('{{ mini_graph|safe }}');
+        
+        console.log("Initializing mini-graph with data");
+
+        function applyTheme(theme) {
+            const isDark = theme === 'dark';
+            const layoutUpdate = {
+                paper_bgcolor: isDark ? 'rgba(20, 30, 48, 0.9)' : '#ffffff',
+                plot_bgcolor: isDark ? 'rgba(20, 30, 48, 0.9)' : '#ffffff',
+                font: {
+                    color: isDark ? '#e0e6ed' : '#212529'
+                },
+                xaxis: {
+                    gridcolor: isDark ? 'rgba(224, 230, 237, 0.1)' : 'rgba(0,0,0,0.1)',
+                    zerolinecolor: isDark ? 'rgba(224, 230, 237, 0.1)' : 'rgba(0,0,0,0.1)',
+                    linecolor: isDark ? 'rgba(224, 230, 237, 0.1)' : 'rgba(0,0,0,0.1)',
+                    tickfont: { color: isDark ? '#e0e6ed' : '#212529' }
+                },
+                yaxis: {
+                    gridcolor: isDark ? 'rgba(224, 230, 237, 0.1)' : 'rgba(0,0,0,0.1)',
+                    zerolinecolor: isDark ? 'rgba(224, 230, 237, 0.1)' : 'rgba(0,0,0,0.1)',
+                    linecolor: isDark ? 'rgba(224, 230, 237, 0.1)' : 'rgba(0,0,0,0.1)',
+                    tickfont: { color: isDark ? '#e0e6ed' : '#212529' }
+                }
+            };
+            
+            // Apply theme to graph
+            if (graphDiv && graphDiv._fullLayout) {
+                Plotly.update(graphDivId, {}, layoutUpdate);
+            }
+        }
+
+        if (graphDiv) {
+            Plotly.newPlot(graphDivId, graphData.data, graphData.layout);
+            const initialTheme = document.documentElement.getAttribute('data-theme') || 'light';
+            applyTheme(initialTheme);
+
+            const observer = new MutationObserver(mutations => {
+                mutations.forEach(mutation => {
+                    if (mutation.type === 'attributes' && mutation.attributeName === 'data-theme') {
+                        const newTheme = document.documentElement.getAttribute('data-theme') || 'light';
+                        applyTheme(newTheme);
+                    }
+                });
+            });
+            observer.observe(document.documentElement, { attributes: true });
+        } else {
+            console.error("Element with ID 'mini-graph' not found.");
+        }
+    } catch (e) {
+        console.error('Error initializing mini-graph:', e);
+        const graphDiv = document.getElementById('mini-graph');
+        if (graphDiv) {
+            graphDiv.innerHTML = '<div class="alert alert-danger">Error loading graph: ' + e.message + '</div>';
+        }
+    }
+    {% endif %}
+});
+</script>
+<script src="{{ url_for('static', filename='js/realtime-updates.js') }}"></script>
+{% endblock %} 

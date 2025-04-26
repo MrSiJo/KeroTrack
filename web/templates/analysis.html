@@ -1,0 +1,440 @@
+{% extends "base.html" %}
+
+{% block title %}Oil Analysis{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4 text-light">Analysis Overview</h1>
+    
+    <!-- Key Headline Metrics - 4 cards in a row -->
+    <div class="row mb-4">
+        <!-- Total Oil Consumption -->
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h6 class="card-title text-muted">Total Consumption</h6>
+                    <h3 class="card-text">
+                        {% if cost_data and cost_data.latest_total_consumption is defined %}
+                            {{ "%.1f"|format(cost_data.latest_total_consumption) }} L
+                        {% else %}
+                            {{ "%.1f"|format(consumption_costs.avg_monthly_liters|default(0)) }} L
+                        {% endif %}
+                    </h3>
+                    <p class="card-text text-muted small">Latest Period</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Total Cost -->
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h6 class="card-title text-muted">Total Cost</h6>
+                    <h3 class="card-text">
+                        {% if cost_data and cost_data.latest_total_cost is defined %}
+                            £{{ "%.2f"|format(cost_data.latest_total_cost) }}
+                        {% else %}
+                            £{{ "%.2f"|format(consumption_costs.avg_monthly_cost|default(0)) }}
+                        {% endif %}
+                    </h3>
+                    <p class="card-text text-muted small">Latest Period</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Average Daily Cost -->
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h6 class="card-title text-muted">Daily Cost</h6>
+                    <h3 class="card-text">
+                        {% if cost_data and cost_data.latest_daily_cost is defined %}
+                            £{{ "%.2f"|format(cost_data.latest_daily_cost) }}
+                        {% else %}
+                            £{{ "%.2f"|format(consumption_costs.avg_daily_cost|default(0)) }}
+                        {% endif %}
+                    </h3>
+                    <p class="card-text text-muted small">Current Average</p>
+                </div>
+            </div>
+        </div>
+        
+        <!-- System Efficiency -->
+        <div class="col-md-3">
+            <div class="card">
+                <div class="card-body text-center">
+                    <h6 class="card-title text-muted">System Efficiency</h6>
+                    <h3 class="card-text">
+                        {% if cost_data and cost_data.energy_efficiency is defined %}
+                            {{ "%.1f"|format(cost_data.energy_efficiency) }}%
+                        {% else %}
+                            -- %
+                        {% endif %}
+                    </h3>
+                    <p class="card-text text-muted small">Latest Period</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="row">
+        <!-- Current Status Card -->
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Current Status</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p class="mb-1"><strong class="text-muted">Last Reading:</strong></p>
+                            <p>{{ current_status.timestamp }}</p>
+                            <p class="mb-1"><strong class="text-muted">Liters Remaining:</strong></p>
+                            <p>{{ "%.1f"|format(current_status.litres_remaining) }}</p>
+                            <p class="mb-1"><strong class="text-muted">Current Price/Liter:</strong></p>
+                            <p>{{ "%.3f"|format(current_status.current_ppl) }} ppl</p>
+                        </div>
+                        <div class="col-md-6">
+                            <p class="mb-1"><strong class="text-muted">Value of Remaining Oil:</strong></p>
+                            <p>£{{ "%.2f"|format(remaining_value) }}</p>
+                            <p class="mb-1"><strong class="text-muted">Daily Consumption Rate:</strong></p>
+                            <p>{{ "%.1f"|format(analysis.daily_consumption_rate) }} L/day</p>
+                            <p class="mb-1"><strong class="text-muted">Days Until Empty:</strong></p>
+                            <p>
+                                {% if analysis.days_until_empty is not none %}
+                                    {{ "%.1f"|format(analysis.days_until_empty) }}
+                                {% else %}
+                                    Unknown
+                                {% endif %}
+                            </p>
+                            <p class="mt-3 mb-1"><strong class="text-muted">Litres to Order (approx):</strong></p>
+                            <p>{{ "%.1f"|format(current_status.litres_to_order) }}</p>
+                            <p class="mb-1"><strong class="text-muted">Cost to Fill (approx):</strong></p>
+                            <p>
+                                {% if current_status.cost_to_fill_float is not none %}
+                                    £{{ "%.2f"|format(current_status.cost_to_fill_float) }}
+                                {% else %}
+                                    N/A
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Analysis Results Card -->
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Consumption Metrics</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <h6>Current Averages</h6>
+                            <p class="mb-1"><strong class="text-muted">Daily Average:</strong></p> 
+                            <p>{{ "%.1f"|format(consumption_costs.avg_daily_liters) }} L (£{{ "%.2f"|format(consumption_costs.avg_daily_cost) }})</p>
+                            <p class="mb-1"><strong class="text-muted">Weekly Average:</strong></p>
+                            <p>{{ "%.1f"|format(consumption_costs.avg_weekly_liters) }} L (£{{ "%.2f"|format(consumption_costs.avg_weekly_cost) }})</p>
+                            <p class="mb-1"><strong class="text-muted">Monthly Average:</strong></p>
+                            <p>{{ "%.1f"|format(consumption_costs.avg_monthly_liters) }} L (£{{ "%.2f"|format(consumption_costs.avg_monthly_cost) }})</p>
+                            <p class="mb-1"><strong class="text-muted">Yearly Average:</strong></p>
+                            <p>{{ "%.1f"|format(consumption_costs.avg_yearly_liters) }} L (£{{ "%.2f"|format(consumption_costs.avg_yearly_cost) }})</p>
+                        </div>
+                        <div class="col-md-6">
+                            <h6>Historical Averages</h6>
+                            <p class="mb-1"><strong class="text-muted">Average Period Cost:</strong></p>
+                            <p>£{{ "%.2f"|format(cost_data.avg_period_cost|default(0)) }}</p>
+                            <p class="mb-1"><strong class="text-muted">Average Daily Cost:</strong></p>
+                            <p>£{{ "%.2f"|format(cost_data.avg_daily_cost|default(0)) }}</p>
+                            <p class="mb-1"><strong class="text-muted">Average Weekly Cost:</strong></p>
+                            <p>£{{ "%.2f"|format(cost_data.avg_weekly_cost|default(0)) }}</p>
+                            <p class="mb-1"><strong class="text-muted">Average Monthly Cost:</strong></p>
+                            <p>£{{ "%.2f"|format(cost_data.avg_monthly_cost|default(0)) }}</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Charts Section -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Total Oil Consumption Over Time</h5>
+                </div>
+                <div class="card-body">
+                    <div id="consumption-chart" style="height: 300px;"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Total Cost Over Time</h5>
+                </div>
+                <div class="card-body">
+                    <div id="cost-chart" style="height: 300px;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Weather Impact Section -->
+    <div class="row mb-4">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Weather Impact</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p class="mb-1"><strong class="text-muted">Latest HDD Total:</strong></p>
+                            <p>
+                                {% if cost_data and cost_data.latest_total_hdd is defined %}
+                                    {{ "%.1f"|format(cost_data.latest_total_hdd) }}
+                                {% else %}
+                                    --
+                                {% endif %}
+                            </p>
+                            <p class="mb-1"><strong class="text-muted">Cost per HDD:</strong></p>
+                            <p>
+                                {% if cost_data and cost_data.latest_cost_per_hdd is defined %}
+                                    £{{ "%.4f"|format(cost_data.latest_cost_per_hdd) }}
+                                {% else %}
+                                    --
+                                {% endif %}
+                            </p>
+                        </div>
+                        <div class="col-md-6">
+                            <p class="mb-1"><strong class="text-muted">Average Cost/HDD:</strong></p>
+                            <p>
+                                {% if cost_data and cost_data.avg_cost_per_hdd is defined %}
+                                    £{{ "%.4f"|format(cost_data.avg_cost_per_hdd) }}
+                                {% else %}
+                                    --
+                                {% endif %}
+                            </p>
+                            <p class="mb-1"><strong class="text-muted">Average L/HDD:</strong></p>
+                            <p>
+                                {% if cost_data and cost_data.avg_consumption_per_hdd is defined %}
+                                    {{ "%.2f"|format(cost_data.avg_consumption_per_hdd) }}
+                                {% else %}
+                                    --
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+                    <div id="hdd-cost-chart" class="mt-3" style="height: 200px;"></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5 class="card-title mb-0">Energy Metrics</h5>
+                </div>
+                <div class="card-body">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p class="mb-1"><strong class="text-muted">Avg Cost per kWh:</strong></p>
+                            <p>
+                                {% if cost_data and cost_data.avg_cost_per_kwh is defined %}
+                                    £{{ "%.4f"|format(cost_data.avg_cost_per_kwh) }}
+                                {% else %}
+                                    --
+                                {% endif %}
+                            </p>
+                            <p class="mb-1"><strong class="text-muted">Daily Energy (kWh):</strong></p>
+                            <p>
+                                {% if cost_data and cost_data.avg_daily_energy_kwh is defined %}
+                                    {{ "%.1f"|format(cost_data.avg_daily_energy_kwh) }}
+                                {% else %}
+                                    --
+                                {% endif %}
+                            </p>
+                        </div>
+                        <div class="col-md-6">
+                            <p class="mb-1"><strong class="text-muted">Last Analysis:</strong></p>
+                            <p>
+                                {% if cost_data and cost_data.analysis_date is defined %}
+                                    {{ cost_data.analysis_date }}
+                                {% else %}
+                                    No data
+                                {% endif %}
+                            </p>
+                            <p class="mb-1"><strong class="text-muted">Total Refill Periods:</strong></p>
+                            <p>
+                                {% if cost_data and cost_data.total_refill_periods is defined %}
+                                    {{ cost_data.total_refill_periods }}
+                                {% else %}
+                                    0
+                                {% endif %}
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.plot.ly/plotly-2.18.2.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Get data from Flask using the tojson filter - wrap in JS parse to ensure proper parsing
+    const chartData = {
+        consumption: {
+            dates: JSON.parse('{{ consumption_dates|safe }}'),
+            values: JSON.parse('{{ consumption_values|safe }}')
+        },
+        costs: {
+            dates: JSON.parse('{{ cost_dates|safe }}'),
+            values: JSON.parse('{{ cost_values|safe }}')
+        },
+        hdd: {
+            dates: JSON.parse('{{ hdd_dates|safe }}'),
+            values: JSON.parse('{{ hdd_cost_values|safe }}')
+        }
+    };
+    
+    // Debug the chart data in console
+    console.log('Chart data loaded:', chartData);
+    
+    // Chart instances store
+    const charts = {};
+    
+    function getThemeColors(theme) {
+        const isDark = theme === 'dark';
+        return {
+            textColor: isDark ? 'rgba(253, 255, 252, 0.8)' : '#666',
+            gridColor: isDark ? 'rgba(253, 255, 252, 0.1)' : 'rgba(0, 0, 0, 0.1)',
+            plotBgColor: isDark ? 'rgba(0, 0, 0, 0)' : 'white',
+            paperBgColor: isDark ? 'rgba(0, 0, 0, 0)' : 'white',
+            primaryColor: '#ff9f1c', // Use consistent primary color
+            secondaryColor: '#2ec4b6' // Use consistent secondary color
+        };
+    }
+
+    function createCharts(theme) {
+        const colors = getThemeColors(theme);
+        
+        // Common layout settings
+        const commonLayout = {
+            margin: { t: 10, r: 10, b: 40, l: 60 },
+            paper_bgcolor: colors.paperBgColor,
+            plot_bgcolor: colors.plotBgColor,
+            font: { color: colors.textColor },
+            xaxis: {
+                gridcolor: colors.gridColor,
+                linecolor: colors.gridColor,
+                tickcolor: colors.textColor,
+                tickfont: { color: colors.textColor }
+            },
+            yaxis: {
+                gridcolor: colors.gridColor,
+                linecolor: colors.gridColor,
+                tickcolor: colors.textColor,
+                tickfont: { color: colors.textColor }
+            },
+            showlegend: false,
+            template: 'plotly_white'
+        };
+        
+        // Config for all charts
+        const commonConfig = {
+            responsive: true,
+            displayModeBar: false
+        };
+        
+        // Consumption Chart
+        if (chartData.consumption.dates.length > 0) {
+            console.log('Creating consumption chart with data points:', chartData.consumption.dates.length);
+            const consumptionTrace = {
+                x: chartData.consumption.dates,
+                y: chartData.consumption.values,
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: { color: colors.primaryColor, width: 2 },
+                marker: { color: colors.primaryColor, size: 6 },
+                name: 'Consumption (L)'
+            };
+            
+            const consumptionLayout = { ...commonLayout };
+            consumptionLayout.yaxis.title = 'Litres';
+            
+            Plotly.newPlot('consumption-chart', [consumptionTrace], consumptionLayout, commonConfig);
+        } else {
+            console.log('No consumption data available for chart');
+            document.getElementById('consumption-chart').innerHTML = '<div class="text-center text-muted my-5">No consumption data available</div>';
+        }
+        
+        // Cost Chart
+        if (chartData.costs.dates.length > 0) {
+            console.log('Creating cost chart with data points:', chartData.costs.dates.length);
+            const costTrace = {
+                x: chartData.costs.dates,
+                y: chartData.costs.values,
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: { color: colors.secondaryColor, width: 2 },
+                marker: { color: colors.secondaryColor, size: 6 },
+                name: 'Cost (£)'
+            };
+            
+            const costLayout = { ...commonLayout };
+            costLayout.yaxis.title = 'Cost (£)';
+            
+            Plotly.newPlot('cost-chart', [costTrace], costLayout, commonConfig);
+        } else {
+            console.log('No cost data available for chart');
+            document.getElementById('cost-chart').innerHTML = '<div class="text-center text-muted my-5">No cost data available</div>';
+        }
+        
+        // HDD Cost Chart
+        if (chartData.hdd.dates.length > 0) {
+            console.log('Creating HDD chart with data points:', chartData.hdd.dates.length);
+            const hddTrace = {
+                x: chartData.hdd.dates,
+                y: chartData.hdd.values,
+                type: 'scatter',
+                mode: 'lines+markers',
+                line: { color: '#ff9f1c', width: 2 },
+                marker: { color: '#ff9f1c', size: 4 },
+                name: 'Cost per HDD (£)'
+            };
+            
+            const hddLayout = { ...commonLayout };
+            hddLayout.height = 200;
+            hddLayout.margin = { t: 10, r: 10, b: 30, l: 50 };
+            hddLayout.yaxis.title = '£/HDD';
+            
+            Plotly.newPlot('hdd-cost-chart', [hddTrace], hddLayout, commonConfig);
+        } else {
+            console.log('No HDD data available for chart');
+            document.getElementById('hdd-cost-chart').innerHTML = '<div class="text-center text-muted my-5">No HDD data available</div>';
+        }
+    }
+    
+    // Initial chart creation
+    const initialTheme = document.documentElement.getAttribute('data-theme') || 'light';
+    createCharts(initialTheme);
+
+    // Use MutationObserver to detect theme changes
+    const observer = new MutationObserver(mutations => {
+        mutations.forEach(mutation => {
+            if (mutation.type === 'attributes' && mutation.attributeName === 'data-theme') {
+                createCharts(document.documentElement.getAttribute('data-theme'));
+            }
+        });
+    });
+    observer.observe(document.documentElement, { attributes: true });
+});
+</script>
+{% endblock %} 

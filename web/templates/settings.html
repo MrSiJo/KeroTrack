@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+
+{% block title %}Oil Monitor - Settings{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col">
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-cog me-2"></i>Settings
+                </h5>
+                <div class="alert alert-info mt-3">
+                    <i class="fas fa-info-circle me-2"></i>
+                    These settings are read-only. To modify them, edit the config.ini file directly.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% for section, settings in config.items() %}
+<div class="row mb-4">
+    <div class="col">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-wrench me-2"></i>{{ section|title }}
+                </h5>
+                <div class="table-responsive mt-4">
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>Setting</th>
+                                <th>Value</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for key, value in settings.items() %}
+                            <tr>
+                                <td>{{ key|replace('_', ' ')|title }}</td>
+                                <td class="font-monospace">{{ value }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endfor %}
+
+<!-- Documentation -->
+<div class="row">
+    <div class="col">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-book me-2"></i>Configuration Guide
+                </h5>
+                <div class="mt-4">
+                    <h6>Tank Settings</h6>
+                    <ul>
+                        <li><strong>Tank Capacity:</strong> Total volume of your oil tank in litres</li>
+                        <li><strong>Tank Dimensions:</strong> Physical dimensions used for volume calculations</li>
+                        <li><strong>Thermal Properties:</strong> Used for temperature compensation</li>
+                    </ul>
+
+                    <h6>Analysis Settings</h6>
+                    <ul>
+                        <li><strong>HDD Base Temperature:</strong> Temperature threshold for heating degree days</li>
+                        <li><strong>Reference Temperature:</strong> Standard temperature for volume calculations</li>
+                        <li><strong>CO2 Per Litre:</strong> CO2 emissions factor for environmental impact</li>
+                    </ul>
+
+                    <h6>Detection Settings</h6>
+                    <ul>
+                        <li><strong>Refill Detection:</strong> Parameters for identifying tank refills</li>
+                        <li><strong>Leak Detection:</strong> Thresholds for leak warnings</li>
+                        <li><strong>Consumption Limits:</strong> Expected consumption ranges</li>
+                    </ul>
+
+                    <h6>Boiler Settings</h6>
+                    <ul>
+                        <li><strong>Model Details:</strong> Your boiler's specifications</li>
+                        <li><strong>Efficiency Parameters:</strong> Performance characteristics</li>
+                        <li><strong>Operational Settings:</strong> Running parameters</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %} 

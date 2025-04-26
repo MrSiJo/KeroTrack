@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}KeroTrack{% endblock %}</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <!-- Plotly.js -->
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <!-- Socket.IO -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    
+    <style>
+        :root {
+            --primary: #005f99; /* Deep blue for trust + tech feel */
+            --secondary: #ffa500; /* Warm amber for heating/energy hint */
+            /* Light Theme Defaults */
+            --bg-color: #f5f7fa; /* Soft off-white background */
+            --text-color: #212529; /* Dark grey for clear readability */
+            --card-bg: #ffffff; /* Pure white cards */
+            --card-border: rgba(0, 0, 0, 0.1); /* Slightly softer border */
+            --navbar-bg: rgba(245, 247, 250, 0.95); /* Light frosted look */
+            --link-color: #0056b3; /* Slightly darker blue for links */
+            --link-hover: #004080; /* Deeper blue on hover */
+            --heading-color: #111827; /* Almost black for strong headings */
+            --muted-text: #6b7280; /* Muted grey */
+        }
+
+        [data-theme="dark"] {
+            --bg-color: #0a0f1a; /* Dark navy rather than pure black */
+            --text-color: #e0e6ed; /* Light grey, easier on eyes than pure white */
+            --card-bg: rgba(20, 30, 48, 0.9); /* Soft dark blue for cards */
+            --card-border: rgba(224, 230, 237, 0.1);
+            --navbar-bg: rgba(10, 15, 26, 0.95); /* Matching navbar */
+            --link-color: #90cdf4; /* Soft blue link colour */
+            --link-hover: var(--primary); /* Reuse deep blue */
+            --heading-color: #ffffff;
+            --muted-text: rgba(224, 230, 237, 0.6);
+        }
+        
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        
+        .navbar {
+            background-color: var(--navbar-bg);
+            backdrop-filter: blur(10px);
+            transition: background-color 0.3s ease;
+        }
+        
+        .navbar-brand, .nav-link {
+            color: var(--link-color) !important;
+        }
+
+        .nav-link:hover {
+            color: var(--link-hover) !important;
+        }
+
+        .nav-link.active {
+            color: var(--primary) !important; /* Active link always uses primary color */
+            font-weight: bold;
+        }
+        
+        .card {
+            background-color: var(--card-bg);
+            border: 1px solid var(--card-border);
+            backdrop-filter: blur(5px);
+            transition: background-color 0.3s ease, border-color 0.3s ease;
+        }
+
+        .card-header {
+            background-color: transparent; /* Cleaner look */
+            border-bottom: 1px solid var(--card-border);
+        }
+
+        /* Ensure headings and text inside cards use theme colors */
+        .card h1, .card h2, .card h3, .card h4, .card h5, .card h6 {
+            color: var(--heading-color);
+        }
+        .card, .card .card-body {
+            color: var(--text-color);
+        }
+        .text-muted, .text-white-50 {
+             color: var(--muted-text) !important; /* Make muted text use theme variable */
+        }
+        
+        .btn-primary {
+            background-color: var(--primary);
+            border-color: var(--primary);
+            color: #ffffff; /* Ensure contrast on primary button */
+        }
+        .btn-primary:hover {
+            opacity: 0.9;
+        }
+        
+        .btn-secondary {
+            background-color: var(--secondary);
+            border-color: var(--secondary);
+            color: #ffffff; /* Ensure contrast on secondary button */
+        }
+        .btn-secondary:hover {
+            opacity: 0.9;
+        }
+        
+        .progress {
+            height: 25px;
+            background-color: rgba(128, 128, 128, 0.2); /* Neutral progress background */
+        }
+        
+        .progress-bar {
+            background-color: var(--primary);
+        }
+        
+        .table {
+            color: var(--text-color);
+            border-color: var(--card-border); /* Match table border */
+        }
+        .table-striped > tbody > tr:nth-of-type(odd) > * {
+            background-color: rgba(128, 128, 128, 0.05); /* Subtle striping */
+            color: var(--text-color);
+        }
+
+        /* Style for theme toggle button */
+        .theme-toggle {
+            cursor: pointer;
+            font-size: 1.25rem;
+            color: var(--link-color);
+        }
+        .theme-toggle:hover {
+            color: var(--link-hover);
+        }
+
+        /* Canvas height */
+        .card-body canvas {
+            max-height: 350px; /* Adjust as needed */
+            width: 100% !important; /* Ensure width fills container */
+        }
+
+        /* Ensure Plotly graphs adapt somewhat */
+        .js-plotly-plot .plotly .gridlayer .grid path {
+            stroke: var(--card-border);
+        }
+        .js-plotly-plot .plotly .zerolinelayer .zeroline {
+            stroke: var(--card-border);
+        }
+         .js-plotly-plot text {
+            fill: var(--muted-text) !important; 
+        }
+         .js-plotly-plot .legendtext {
+             fill: var(--text-color) !important; 
+         }
+
+    </style>
+    
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg fixed-top">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <img src="{{ url_for('static', filename='images/logo.png') }}" alt="KeroTrack" height="36" style="margin-right: 0.5rem; vertical-align: middle;">
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'index' %}active{% endif %}" href="/">
+                            <i class="fas fa-home me-1"></i>Home
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'historical' %}active{% endif %}" href="/historical">
+                            <i class="fas fa-chart-line me-1"></i>Historical
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'analysis' %}active{% endif %}" href="/analysis">
+                            <i class="fas fa-calculator me-1"></i>Analysis
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'records' %}active{% endif %}" href="/records">
+                            <i class="fas fa-database me-1"></i>Records
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'mqtt_viewer.index' %}active{% endif %}" href="/mqtt">
+                            <i class="fas fa-satellite-dish me-1"></i>MQTT
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if request.endpoint == 'settings' %}active{% endif %}" href="/settings">
+                            <i class="fas fa-cog me-1"></i>Settings
+                        </a>
+                    </li>
+                </ul>
+                <!-- Theme Toggle Button -->
+                <div class="d-flex">
+                    <i id="theme-toggle-button" class="fas fa-sun theme-toggle"></i>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-5 pt-4">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                        {{ message }}
+                        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+                    </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Real-time Updates -->
+    <script src="{{ url_for('static', filename='js/realtime-updates.js') }}"></script>
+    <script>
+        // Create Socket.IO connection
+        const socket = io();
+
+        // Handle status updates
+        socket.on('status_update', function(data) {
+            logDebug('Received status update', data);
+            
+            // Update elements with data-realtime attributes
+            document.querySelectorAll('[data-realtime]').forEach(element => {
+                const key = element.dataset.realtime.split('.');
+                let value = data;
+                
+                // Traverse the path to get the value
+                for (const k of key) {
+                    if (value && value[k] !== undefined) {
+                        value = value[k];
+                    } else {
+                        value = null;
+                        break;
+                    }
+                }
+                
+                // Update element if value exists
+                if (value !== null) {
+                    const oldValue = element.textContent;
+                    
+                    // Handle different element types
+                    if (element.tagName === 'INPUT') {
+                        element.value = value;
+                    } else if (element.classList.contains('progress-bar')) {
+                        // Update progress bar
+                        element.style.width = `${value}%`;
+                        element.setAttribute('aria-valuenow', value);
+                        
+                        // Update progress bar color
+                        if (element.dataset.realtimeClass) {
+                            const newClass = getProgressClass(key[key.length-1], value);
+                            element.classList.remove('progress-low', 'progress-medium', 'progress-good', 'progress-normal');
+                            element.classList.add(newClass);
+                        }
+                    } else {
+                        // Regular text element - format value
+                        const formattedValue = formatValue(key[key.length-1], value);
+                        
+                        // Only update and highlight if value changed
+                        if (oldValue !== formattedValue) {
+                            element.textContent = formattedValue;
+                            highlightElement(element);
+                        }
+                    }
+                }
+            });
+        });
+
+        // Handle graph updates
+        socket.on('graph_update', function(data) {
+            logDebug('Received graph update', data);
+            
+            // Update Plotly graphs
+            document.querySelectorAll('[data-graph]').forEach(element => {
+                const graphType = element.dataset.graph;
+                if (data[graphType]) {
+                    try {
+                        const graphData = JSON.parse(data[graphType]);
+                        Plotly.react(element.id, graphData.data, graphData.layout);
+                        
+                        // Apply theme
+                        const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                        const layoutUpdate = {
+                            paper_bgcolor: isDark ? 'rgba(20, 30, 48, 0.9)' : '#ffffff',
+                            plot_bgcolor: isDark ? 'rgba(20, 30, 48, 0.9)' : '#ffffff',
+                            font: { color: isDark ? '#e0e6ed' : '#212529' },
+                            xaxis: {
+                                gridcolor: isDark ? 'rgba(224, 230, 237, 0.1)' : 'rgba(0,0,0,0.1)',
+                                tickfont: { color: isDark ? '#e0e6ed' : '#212529' }
+                            },
+                            yaxis: {
+                                gridcolor: isDark ? 'rgba(224, 230, 237, 0.1)' : 'rgba(0,0,0,0.1)',
+                                tickfont: { color: isDark ? '#e0e6ed' : '#212529' }
+                            }
+                        };
+                        Plotly.update(element.id, {}, layoutUpdate);
+                    } catch (e) {
+                        logError('Failed to update graph', e);
+                    }
+                }
+            });
+        });
+
+        // Handle connection status
+        socket.on('connect', function() {
+            logDebug('Connected to server', { connected: true });
+        });
+
+        socket.on('disconnect', function() {
+            logDebug('Disconnected from server', { connected: false });
+        });
+    </script>
+    
+    <!-- Theme Switcher JS -->
+    <script>
+        const themeToggleButton = document.getElementById('theme-toggle-button');
+        const currentTheme = localStorage.getItem('theme') ? localStorage.getItem('theme') : null;
+        const prefersDarkScheme = window.matchMedia('(prefers-color-scheme: dark)');
+
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            if (theme === 'dark') {
+                themeToggleButton.classList.remove('fa-sun');
+                themeToggleButton.classList.add('fa-moon');
+            } else {
+                themeToggleButton.classList.remove('fa-moon');
+                themeToggleButton.classList.add('fa-sun');
+            }
+             // Force Plotly redraw (simple approach)
+            window.dispatchEvent(new Event('resize'));
+        }
+
+        // Apply initial theme
+        if (currentTheme) {
+            setTheme(currentTheme);
+        } else if (prefersDarkScheme.matches) {
+            setTheme('dark');
+        } else {
+            setTheme('light'); // Default to light if no preference stored or detected
+        }
+
+        // Listener for toggle button
+        themeToggleButton.addEventListener('click', () => {
+            const newTheme = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+            setTheme(newTheme);
+        });
+
+        // Listener for OS theme changes
+        prefersDarkScheme.addEventListener('change', e => {
+             // Only change if no theme is explicitly set by user
+             if (!localStorage.getItem('theme')) {
+                 setTheme(e.matches ? 'dark' : 'light');
+             }
+        });
+    </script>
+    
+    <!-- Custom JS -->
+    {% block scripts %}{% endblock %}
+</body>
+</html> 
