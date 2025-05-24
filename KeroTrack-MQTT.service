@@ -1,0 +1,16 @@
+[Unit]
+Description=KeroTrack MQTT Data Transformer Service
+After=network.target
+
+[Service]
+Type=simple
+User=KeroTrack
+Group=KeroTrack
+WorkingDirectory=/opt/KeroTrack
+ExecStart=/opt/KeroTrack/start-mqtt.sh
+StandardOutput=append:/var/log/KeroTrack-mqtt.log
+StandardError=append:/var/log/KeroTrack-mqtt.err
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target 

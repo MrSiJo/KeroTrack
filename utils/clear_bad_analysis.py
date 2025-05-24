@@ -3,7 +3,7 @@ import os
 
 DB_PATH = 'oil_data.db'
 # The first timestamp potentially affected by the bad reading data
-START_DATE_TO_DELETE = '2025-03-16 07:30:00' 
+START_DATE_TO_DELETE = '2025-05-02 22:00:01' 
 
 def clear_bad_analysis_results():
     """Deletes analysis results from a specific date onwards."""

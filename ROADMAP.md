@@ -21,6 +21,31 @@ This document outlines the planned features and enhancements for the Domestic He
 
 ---
 
+### Dockerization & Config Migration Roadmap
+
+#### Phase 1 (1–3 months)
+- **Dockerization (Initial):**
+  - Create a Dockerfile for KeroTrack to enable containerized deployment.
+  - Add a `.dockerignore` file to optimize image builds.
+  - Provide basic documentation for running KeroTrack in Docker.
+  - Support environment variable overrides for key configuration options.
+
+#### Phase 2 (3–6 months)
+- **Docker Compose & Database Integration:**
+  - Add a `docker-compose.yml` to orchestrate KeroTrack with its database and any supporting services (e.g., MQTT broker).
+  - Refactor configuration management to support reading from both files and environment variables for easier containerization.
+  - Begin migrating selected configuration options (e.g., thresholds, notification settings) from files to the database.
+  - Implement a migration script or admin UI for moving config data.
+
+#### Future Enhancements
+- **Full Config Database Migration & Dynamic Management:**
+  - Complete migration of all relevant configuration from files to the database.
+  - Provide a web-based admin interface for managing configuration dynamically.
+  - Support hot-reloading of configuration changes without container restarts.
+  - Document best practices for secure secrets/config management in containerized environments.
+
+---
+
 ## Future Enhancements
 - **Multi‑Tank Support**: monitor and manage multiple heating oil tanks from a single interface
 - **Leak Detection Improvements**: enhance anomaly detection for potential leaks and system faults

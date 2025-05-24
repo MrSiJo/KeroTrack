@@ -1,4 +1,4 @@
-data/*.txt
-data/*.db
+data/*
 config/config.yaml
 logs/*
+utils/__pycache__/*

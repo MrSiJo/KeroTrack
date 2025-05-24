@@ -1,0 +1,16 @@
+[Unit]
+Description=KeroTrack Web Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=KeroTrack
+Group=KeroTrack
+WorkingDirectory=/opt/KeroTrack/web
+ExecStart=/opt/KeroTrack/start-web.sh
+StandardOutput=append:/var/log/KeroTrack-web.log
+StandardError=append:/var/log/KeroTrack-web.err
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target 

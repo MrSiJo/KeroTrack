@@ -1,6 +1,6 @@
-#!/bin/sh
+#!/bin/bash
 
-# This script is used to setup the KeroTrack Oil Tank Monitoring System on an Alpine Linux LXC.
+# This script is used to setup the KeroTrack Oil Tank Monitoring System on a Debian/Ubuntu LXC or VM.
 
 # Exit on any error
 set -e
@@ -15,20 +15,19 @@ echo "Starting KeroTrack Setup Script..."
 
 # Create KeroTrack user and group
 echo "Creating KeroTrack user and group..."
-addgroup -S KeroTrack
-adduser -S -D -H -h /opt/KeroTrack -s /sbin/nologin -G KeroTrack -g "KeroTrack service account" KeroTrack
+groupadd --system KeroTrack || true
+useradd --system --home /opt/KeroTrack --shell /usr/sbin/nologin --gid KeroTrack --comment "KeroTrack service account" KeroTrack || true
 
 # Update system and install required packages
 echo "Installing required packages..."
-apk update
-apk add --no-cache \
+apt-get update
+apt-get install -y \
     python3 \
+    python3-venv \
     python3-dev \
-    py3-pip \
+    python3-pip \
     gcc \
-    musl-dev \
-    linux-headers \
-    sqlite \
+    build-essential \
     mosquitto-clients \
     dos2unix \
     sudo
@@ -40,6 +39,7 @@ install -d -m 755 /opt/KeroTrack/web
 install -d -m 755 /opt/KeroTrack/data
 install -d -m 755 /opt/KeroTrack/config
 install -d -m 755 /opt/KeroTrack/scripts
+install -d -m 755 /opt/KeroTrack/utils
 
 # Create log files
 echo "Setting up log files..."
@@ -50,20 +50,23 @@ touch /var/log/KeroTrack-costanalysis.log /var/log/KeroTrack-costanalysis.err
 
 # Copy files (assuming they're in the current directory)
 echo "Copying files..."
-cp config/config.yaml oil_analysis.py oil_recalc.py oil_mqtt_transform.py oil_cost_analysis.py db_connection.py /opt/KeroTrack/
-cp config/* /opt/KeroTrack/config/
-cp data/* /opt/KeroTrack/data/
+# cp config/config.yaml oil_analysis.py oil_recalc.py oil_mqtt_transform.py oil_cost_analysis.py db_connection.py /opt/KeroTrack/
+cp -r config/* /opt/KeroTrack/config/
+cp -r data/* /opt/KeroTrack/data/
 cp -r web/* /opt/KeroTrack/web/
 cp -r scripts/* /opt/KeroTrack/scripts/
 cp -r utils/* /opt/KeroTrack/utils/
 
+# Update database path in config.yaml to absolute path
+sed -i 's|path:.*|path: /opt/KeroTrack/data/KeroTrack_data.db|' /opt/KeroTrack/config/config.yaml
+
 # Fix line endings
 echo "Fixing line endings..."
-dos2unix /opt/KeroTrack/*.py
-dos2unix /opt/KeroTrack/config/*.yaml
-dos2unix /opt/KeroTrack/web/*.py
-dos2unix /opt/KeroTrack/scripts/*.py
-dos2unix /opt/KeroTrack/utils/*.py
+dos2unix /opt/KeroTrack/*.py || true
+dos2unix /opt/KeroTrack/config/*.yaml || true
+dos2unix /opt/KeroTrack/web/*.py || true
+dos2unix /opt/KeroTrack/scripts/*.py || true
+dos2unix /opt/KeroTrack/utils/*.py || true
 
 # Create and set up virtual environment
 echo "Setting up Python virtual environment..."
@@ -82,7 +85,9 @@ echo "Installing Python packages..."
     flask-socketio==5.3.6 \
     eventlet==0.33.3 \
     pyyaml>=6.0.1 \
-    python-dateutil
+    python-dateutil \
+    requests \
+    beautifulsoup4
 
 # Create startup scripts
 echo "Creating startup scripts..."
@@ -107,51 +112,9 @@ EOF
 
 chmod +x /opt/KeroTrack/start-*.sh
 
-# Set up MQTT transformer service
-echo "Setting up MQTT transformer service..."
-cat > /etc/init.d/KeroTrack-MQTT << 'EOF'
-#!/sbin/openrc-run
-
-name="KeroTrack-MQTT"
-description="KeroTrack MQTT Data Transformer Service"
-command="/opt/KeroTrack/start-mqtt.sh"
-command_background="yes"
-command_user="KeroTrack:KeroTrack"
-pidfile="/run/${RC_SVCNAME}.pid"
-directory="/opt/KeroTrack"
-output_log="/var/log/KeroTrack-mqtt.log"
-error_log="/var/log/KeroTrack-mqtt.err"
-
-depend() {
-    need net
-    after firewall
-}
-EOF
-
-# Set up web dashboard service
-echo "Setting up web dashboard service..."
-cat > /etc/init.d/KeroTrack-Web << 'EOF'
-#!/sbin/openrc-run
-
-name="KeroTrack-Web"
-description="KeroTrack Web Dashboard"
-command="/opt/KeroTrack/start-web.sh"
-command_background="yes"
-command_user="KeroTrack:KeroTrack"
-pidfile="/run/${RC_SVCNAME}.pid"
-directory="/opt/KeroTrack/web"
-output_log="/var/log/KeroTrack-web.log"
-error_log="/var/log/KeroTrack-web.err"
-
-depend() {
-    need net
-    after firewall
-}
-EOF
-
 # Set up weekly analysis cron job
 echo "Setting up weekly analysis cron job..."
-cat > /etc/periodic/weekly/KeroTrack-Analysis << 'EOF'
+cat > /etc/cron.weekly/KeroTrack-Analysis << 'EOF'
 #!/bin/sh
 VENV_PYTHON="/opt/KeroTrack/venv/bin/python3"
 export PYTHONPATH="/opt/KeroTrack:${PYTHONPATH}"
@@ -161,7 +124,7 @@ EOF
 
 # Set up monthly cost analysis cron job
 echo "Setting up monthly cost analysis cron job..."
-cat > /etc/periodic/monthly/KeroTrack-CostAnalysis << 'EOF'
+cat > /etc/cron.monthly/KeroTrack-CostAnalysis << 'EOF'
 #!/bin/sh
 VENV_PYTHON="/opt/KeroTrack/venv/bin/python3"
 export PYTHONPATH="/opt/KeroTrack:${PYTHONPATH}"
@@ -170,9 +133,8 @@ exec $VENV_PYTHON oil_cost_analysis.py >> /var/log/KeroTrack-costanalysis.log 2>
 EOF
 
 # Make files executable
-chmod +x /etc/init.d/KeroTrack-*
-chmod +x /etc/periodic/weekly/KeroTrack-Analysis
-chmod +x /etc/periodic/monthly/KeroTrack-CostAnalysis
+chmod +x /etc/cron.weekly/KeroTrack-Analysis
+chmod +x /etc/cron.monthly/KeroTrack-CostAnalysis
 
 # Set correct permissions
 echo "Setting permissions..."
@@ -182,46 +144,25 @@ chmod -R 755 /opt/KeroTrack
 chmod 644 /opt/KeroTrack/config/config.yaml
 chmod 644 /var/log/KeroTrack-*
 
-# Enable services
-echo "Enabling services..."
-rc-update add KeroTrack-MQTT default
-rc-update add KeroTrack-Web default
-rc-update add crond default
+# Copy systemd service files and enable/start services
+echo "Setting up systemd services..."
+cp KeroTrack-MQTT.service /etc/systemd/system/
+cp KeroTrack-Web.service /etc/systemd/system/
+dos2unix /etc/systemd/system/KeroTrack-MQTT.service || true
+dos2unix /etc/systemd/system/KeroTrack-Web.service || true
+systemctl daemon-reload
+systemctl enable KeroTrack-MQTT.service
+systemctl start KeroTrack-MQTT.service
+systemctl enable KeroTrack-Web.service
+systemctl start KeroTrack-Web.service
 
-# Start services
-echo "Starting services..."
-rc-service crond start
-rc-service KeroTrack-MQTT start
-rc-service KeroTrack-Web start
-
-echo "Setup complete! Checking service status..."
-rc-service KeroTrack-MQTT status
-rc-service KeroTrack-Web status
-
-# Get the primary IP address for web interface
-WEB_IP=$(ip -4 addr show | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '^127\.' | grep -v '^172\.' | grep -v '^10\.' | head -n1)
-
-echo """
-Installation completed successfully!
-
-KeroTrack components:
-1. MQTT Transformer Service (KeroTrack-MQTT)
-   - Handles real-time data transformation
-   - Status: rc-service KeroTrack-MQTT status
-   - Logs: tail -f /var/log/KeroTrack-mqtt.{log,err}
-
-2. Web Dashboard (KeroTrack-Web)
-   - Provides web interface at http://${WEB_IP}:5000
-   - Status: rc-service KeroTrack-Web status
-   - Logs: tail -f /var/log/KeroTrack-web.{log,err}
-
-3. Weekly Analysis (cron job)
-   - Runs every week automatically
-   - Logs: tail -f /var/log/KeroTrack-analysis.{log,err}
-
-4. Monthly Cost Analysis (cron job)
-   - Runs monthly automatically
-   - Logs: tail -f /var/log/KeroTrack-costanalysis.{log,err}
-
-All services are now configured and running.
-""" 
+echo "Setup complete!"
+echo "Next steps:"
+echo "1. Create systemd service files for KeroTrack-MQTT and KeroTrack-Web (see documentation or ask for examples)."
+echo "2. Enable and start the services with:"
+echo "   sudo systemctl enable KeroTrack-MQTT.service"
+echo "   sudo systemctl start KeroTrack-MQTT.service"
+echo "   sudo systemctl enable KeroTrack-Web.service"
+echo "   sudo systemctl start KeroTrack-Web.service"
+echo "3. Check logs in /var/log/KeroTrack-*.log and /var/log/KeroTrack-*.err"
+echo "4. Web interface will be available at http://<your-server-ip>:5000" 
