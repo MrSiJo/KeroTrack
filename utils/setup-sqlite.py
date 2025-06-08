@@ -151,12 +151,14 @@ def setup_database(db_path=None):
             # Create table if it doesn't exist
             # Handle composite primary keys and other constraints appropriately
             columns_sql = []
+            primary_key = None
             for col in columns:
                 if col[0] == 'PRIMARY KEY':
-                    columns_sql.append(col[1])
+                    primary_key = f"PRIMARY KEY {col[1]}"
                 else:
                     columns_sql.append(f"{col[0]} {col[1]}")
-            
+            if primary_key:
+                columns_sql.append(primary_key)
             columns_sql_str = ', '.join(columns_sql)
             c.execute(f"CREATE TABLE {table_name} ({columns_sql_str})")
             print(f"Created table: {table_name}")

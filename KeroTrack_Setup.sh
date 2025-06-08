@@ -75,17 +75,17 @@ python3 -m venv /opt/KeroTrack/venv
 # Install required Python packages
 echo "Installing Python packages..."
 /opt/KeroTrack/venv/bin/python3 -m pip install --no-cache-dir \
-    Flask==3.0.0 \
-    numpy==1.24.3 \
-    pandas==1.5.3 \
-    plotly==5.18.0 \
-    configparser==6.0.0 \
-    python-dotenv==1.0.0 \
-    paho-mqtt==1.6.1 \
-    flask-socketio==5.3.6 \
-    eventlet==0.33.3 \
-    pyyaml>=6.0.1 \
-    python-dateutil \
+    Flask==3.1.0 \
+    numpy==2.2.6 \
+    pandas==2.2.3 \
+    plotly==5.22.0 \
+    configparser==7.2.0 \
+    python-dotenv==1.1.0 \
+    paho-mqtt==2.1.0 \
+    flask-socketio==5.5.1 \
+    eventlet==0.39.1 \
+    pyyaml==6.0.2 \
+    python-dateutil==2.9.0.post0 \
     requests \
     beautifulsoup4
 
