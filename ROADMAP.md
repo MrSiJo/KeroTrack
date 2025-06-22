@@ -5,7 +5,6 @@ This document outlines the planned features and enhancements for the Domestic He
 ---
 
 ### Phase 1 (1–3 months)
-- **Gotify Notifications**: integrate threshold alerts via Gotify for low‑oil warnings and refill reminders
 - **MQTT Topic Viewer**: add a raw JSON viewer in the web UI to inspect messages on specific MQTT topics in real time
 - **Web Security Fundamentals**: implement authentication for the web interface and secure configuration management
 - **Data Protection**: fix SQL injection vulnerabilities and add CSRF protection to all forms

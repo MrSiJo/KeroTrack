@@ -71,4 +71,10 @@ mqtt:
       topicname: "oiltank/analytics"    # MQTT topic for analytics data
       qos: 0                            # Quality of Service level
     - name: "sensor/readings"           # Example external sensor topic
-      qos: 0                            # Quality of Service level 
+      qos: 0                            # Quality of Service level
+
+notifications:
+  apprise_urls:
+    - gotify://your-gotify-host.com/your-app-token
+    # - telegram://YourTelegramBotToken/YourChatID
+    # - discord://webhook_id/webhook_token

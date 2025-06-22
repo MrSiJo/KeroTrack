@@ -9,7 +9,7 @@ The project is named KeroTrack because it tracks and monitors the kerosene fuel 
 ## Why
 
 I created this project using Cursor, with no prior experience in Python or Flask.
-While I’m new to coding in this language, I have over 20 years of experience in the IT sector, and I love problem-solving and exploring different ways to approach challenges.
+While I'm new to coding in this language, I have over 20 years of experience in the IT sector, and I love problem-solving and exploring different ways to approach challenges.
 Cursor has given me the opportunity to apply my experience in a new way — maybe you could call it vibe coding!
 
 ## Overview
@@ -28,6 +28,7 @@ The Watchman Sonic transmits data about oil levels in domestic heating oil tanks
 - Refill detection
 - Leak detection
 - Integration with Home Assistant for data visualization
+- **Automated Summaries**: Receive weekly and monthly summary notifications via Apprise (supporting Gotify, Telegram, etc.) detailing usage, cost, trends, and forecasts.
 - **Web Interface Features:**
   - Real-time tank status dashboard
   - Historical data visualization
@@ -42,6 +43,7 @@ The Watchman Sonic transmits data about oil levels in domestic heating oil tanks
 - `oilmqtttransform`: Subscribes to MQTT topics and processes incoming oil level data
 - `oil_recalc.py`: Processes oil level data, calculates derived metrics, and updates the database
 - `oil_analysis.py`: Performs in-depth analysis on collected data
+- `notifier.py`: Sends weekly and monthly summary notifications via Apprise.
 - `setup-sqlite.py`: Initializes the SQLite database with WAL mode for improved performance
 - `config.yaml`: Comprehensive configuration file for system parameters, analysis settings, and hardware specifications
 - `db_connection.py`: Implements SQLite connection management with WAL mode support
@@ -121,7 +123,7 @@ The Watchman Sonic transmits data about oil levels in domestic heating oil tanks
 - PyPy3 for improved performance
 
 ### Python Packages
-- Core packages: `requests`, `beautifulsoup4`, `ujson`, `configparser`, `tqdm`
+- Core packages: `requests`, `beautifulsoup4`, `ujson`, `configparser`, `tqdm`, `apprise`
 - Web interface packages: `flask`, `plotly`, `pandas`
 - MQTT broker
 
@@ -186,6 +188,35 @@ sudo rc-service KeroTrack-MQTT stop
 # Restart the service
 sudo rc-service KeroTrack-MQTT restart
 ```
+
+### Notifier Service Management
+
+The notifier service sends weekly and monthly summaries and runs as a cron job.
+
+1.  **Configure `config.yaml`**: Add your Apprise URL(s) under the `notifications` section.
+    ```yaml
+    notifications:
+      apprise_urls:
+        - "gotify://your-host/your-token"
+        # - "tgram://your-bot-token/your-chat-id"
+    ```
+    The script will automatically handle Markdown formatting for Gotify.
+
+2.  **Set up the cron job**: To run the notifier every Sunday at 8:00 AM, create a cron file:
+    ```bash
+    sudo nano /etc/cron.d/KeroTrack-Notifier
+    ```
+    Add the following content:
+    ```cron
+    # Send KeroTrack weekly summary every Sunday at 8am
+    0 8 * * 0   KeroTrack    cd /opt/KeroTrack && /opt/KeroTrack/venv/bin/python3 /opt/KeroTrack/notifier.py >> /var/log/KeroTrack-notifier.log 2>&1
+    ```
+
+3.  **Run manually for testing**:
+    ```bash
+    # Run with monthly summary included for testing
+    sudo -u KeroTrack -H bash -c "cd /opt/KeroTrack && /opt/KeroTrack/venv/bin/python3 notifier.py --test"
+    ```
 
 ### Analysis Job Management
 
