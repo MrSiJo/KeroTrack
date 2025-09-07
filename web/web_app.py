@@ -592,9 +592,8 @@ def analysis():
 @app.route('/settings')
 def settings():
     """Settings page for configuring parameters."""
-    # Load current settings from config.ini
-    config_data = {section: dict(config[section]) 
-                  for section in config.sections()}
+    # config is already a dict from load_config(), so we can use it directly
+    config_data = config
     
     return render_template('settings.html',
                          config=config_data)
