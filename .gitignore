@@ -2,3 +2,4 @@ data/*
 config/config.yaml
 logs/*
 utils/__pycache__/*
+update_kerotrack.sh
