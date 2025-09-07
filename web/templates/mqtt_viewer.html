@@ -1,103 +1,12 @@
 {% extends "base.html" %}
 
-{% block title %}MQTT Topic Viewer - Oil Monitor{% endblock %}
+{% block title %}KeroTrack - MQTT{% endblock %}
 
 {% block extra_head %}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/languages/json.min.js"></script>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
-<style>
-    .topics-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
-        gap: 20px;
-        align-items: start;
-        margin-top: 80px; /* Account for fixed navbar */
-    }
-    .topic-container {
-        background: var(--card-bg);
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        overflow: hidden;
-        height: 100%;
-        display: flex;
-        flex-direction: column;
-    }
-    .topic-header {
-        background: var(--navbar-bg);
-        color: var(--text-color);
-        padding: 15px 20px;
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        border-bottom: 1px solid var(--card-border);
-    }
-    .topic-name {
-        font-size: 1.1em;
-        font-weight: 600;
-        margin: 0;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .timestamp {
-        font-size: 0.9em;
-        opacity: 0.9;
-        margin-left: 20px;
-        white-space: nowrap;
-        color: var(--muted-text);
-    }
-    .message-container {
-        padding: 20px;
-        background: #1e1e1e;
-        margin: 0;
-        overflow-x: auto;
-        flex-grow: 1;
-    }
-    pre {
-        margin: 0;
-        min-width: fit-content;
-    }
-    code {
-        font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Consolas', monospace;
-        font-size: 14px;
-    }
-    .status-indicator {
-        display: inline-block;
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        margin-right: 10px;
-        flex-shrink: 0;
-    }
-    .status-active {
-        background-color: var(--secondary);
-        box-shadow: 0 0 5px var(--secondary);
-    }
-    .status-inactive {
-        background-color: var(--muted-text);
-    }
-    @media (max-width: 1200px) {
-        .topics-grid {
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-        }
-    }
-    @media (max-width: 768px) {
-        .topics-grid {
-            grid-template-columns: 1fr;
-            margin-top: 60px;
-        }
-        .topic-header {
-            flex-direction: column;
-            align-items: flex-start;
-        }
-        .timestamp {
-            margin-left: 18px;
-            margin-top: 5px;
-        }
-    }
-</style>
 {% endblock %}
 
 {% block content %}
@@ -163,4 +72,4 @@
         console.log('Disconnected from server');
     });
 </script>
-{% endblock %} 
+{% endblock %}

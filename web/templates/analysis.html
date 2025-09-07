@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}Oil Analysis{% endblock %}
+{% block title %}KeroTrack - Analysis{% endblock %}
 
 {% block content %}
 <div class="container mt-4">
@@ -66,7 +66,11 @@
                     <h6 class="card-title text-muted">System Efficiency</h6>
                     <h3 class="card-text">
                         {% if cost_data and cost_data.energy_efficiency is defined %}
-                            {{ "%.1f"|format(cost_data.energy_efficiency) }}%
+                            {% if cost_data.energy_efficiency < 1 %}
+                                {{ "%.1f"|format(cost_data.energy_efficiency * 100) }}%
+                            {% else %}
+                                {{ "%.1f"|format(cost_data.energy_efficiency) }}%
+                            {% endif %}
                         {% else %}
                             -- %
                         {% endif %}
@@ -327,7 +331,7 @@ document.addEventListener('DOMContentLoaded', function() {
         
         // Common layout settings
         const commonLayout = {
-            margin: { t: 10, r: 10, b: 40, l: 60 },
+            margin: { t: 10, r: 10, b: 60, l: 60 },
             paper_bgcolor: colors.paperBgColor,
             plot_bgcolor: colors.plotBgColor,
             font: { color: colors.textColor },
@@ -335,7 +339,12 @@ document.addEventListener('DOMContentLoaded', function() {
                 gridcolor: colors.gridColor,
                 linecolor: colors.gridColor,
                 tickcolor: colors.textColor,
-                tickfont: { color: colors.textColor }
+                tickfont: { color: colors.textColor, size: 10 },
+                tickangle: 0,  // Horizontal labels
+                automargin: true,  // Auto-adjust margins to prevent truncation
+                tickmode: 'linear',  // Ensure even spacing
+                dtick: 1,  // Show every tick
+                nticks: 8  // Limit to 8 ticks maximum
             },
             yaxis: {
                 gridcolor: colors.gridColor,
@@ -359,10 +368,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const consumptionTrace = {
                 x: chartData.consumption.dates,
                 y: chartData.consumption.values,
-                type: 'scatter',
-                mode: 'lines+markers',
-                line: { color: colors.primaryColor, width: 2 },
-                marker: { color: colors.primaryColor, size: 6 },
+                type: 'bar',
+                marker: { color: colors.primaryColor },
                 name: 'Consumption (L)'
             };
             
@@ -381,10 +388,8 @@ document.addEventListener('DOMContentLoaded', function() {
             const costTrace = {
                 x: chartData.costs.dates,
                 y: chartData.costs.values,
-                type: 'scatter',
-                mode: 'lines+markers',
-                line: { color: colors.secondaryColor, width: 2 },
-                marker: { color: colors.secondaryColor, size: 6 },
+                type: 'bar',
+                marker: { color: colors.secondaryColor },
                 name: 'Cost (£)'
             };
             

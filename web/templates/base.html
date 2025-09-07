@@ -14,10 +14,43 @@
     <!-- Socket.IO -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
     
+    <!-- Load site stylesheet BEFORE the big base <style> so base can win on conflicts -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    
     <style>
         :root {
+            /* Design System Colors */
             --primary: #005f99; /* Deep blue for trust + tech feel */
             --secondary: #ffa500; /* Warm amber for heating/energy hint */
+            --success: #28a745;
+            --warning: #ffc107;
+            --danger: #dc3545;
+            --info: #17a2b8;
+            
+            /* Spacing System */
+            --spacing-xs: 0.25rem;
+            --spacing-sm: 0.5rem;
+            --spacing-md: 1rem;
+            --spacing-lg: 1.5rem;
+            --spacing-xl: 2rem;
+            --spacing-xxl: 3rem;
+            
+            /* Typography Scale */
+            --font-size-xs: 0.75rem;
+            --font-size-sm: 0.875rem;
+            --font-size-base: 1rem;
+            --font-size-lg: 1.125rem;
+            --font-size-xl: 1.25rem;
+            --font-size-xxl: 1.5rem;
+            --font-size-xxxl: 2rem;
+            
+            /* Component Variables */
+            --card-border-radius: 12px;
+            --card-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            --card-shadow-hover: 0 4px 16px rgba(0,0,0,0.15);
+            --transition-base: all 0.2s ease-in-out;
+            --transition-slow: all 0.3s ease-in-out;
+            
             /* Light Theme Defaults */
             --bg-color: #f5f7fa; /* Soft off-white background */
             --text-color: #212529; /* Dark grey for clear readability */
@@ -70,8 +103,15 @@
         .card {
             background-color: var(--card-bg);
             border: 1px solid var(--card-border);
+            border-radius: var(--card-border-radius);
+            box-shadow: var(--card-shadow);
             backdrop-filter: blur(5px);
-            transition: background-color 0.3s ease, border-color 0.3s ease;
+            transition: var(--transition-base);
+        }
+        
+        .card:hover {
+            transform: translateY(-2px);
+            box-shadow: var(--card-shadow-hover);
         }
 
         .card-header {
@@ -90,31 +130,65 @@
              color: var(--muted-text) !important; /* Make muted text use theme variable */
         }
         
+        .btn {
+            border-radius: var(--spacing-sm);
+            font-weight: 500;
+            transition: var(--transition-base);
+            padding: var(--spacing-sm) var(--spacing-lg);
+        }
+        
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        
         .btn-primary {
             background-color: var(--primary);
             border-color: var(--primary);
-            color: #ffffff; /* Ensure contrast on primary button */
+            color: #ffffff;
         }
         .btn-primary:hover {
-            opacity: 0.9;
+            background-color: #004080;
+            border-color: #004080;
         }
         
         .btn-secondary {
             background-color: var(--secondary);
             border-color: var(--secondary);
-            color: #ffffff; /* Ensure contrast on secondary button */
+            color: #ffffff;
         }
         .btn-secondary:hover {
-            opacity: 0.9;
+            background-color: #e69500;
+            border-color: #e69500;
         }
         
         .progress {
-            height: 25px;
-            background-color: rgba(128, 128, 128, 0.2); /* Neutral progress background */
+            height: 28px;
+            background-color: rgba(128, 128, 128, 0.2);
+            border-radius: var(--spacing-sm);
+            overflow: hidden;
         }
         
         .progress-bar {
             background-color: var(--primary);
+            transition: width 0.5s ease, background-color 0.3s ease;
+            position: relative;
+        }
+        
+        .progress-bar::after {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: linear-gradient(45deg, transparent 30%, rgba(255,255,255,0.2) 50%, transparent 70%);
+            animation: shimmer 2s infinite;
+        }
+        
+        @keyframes shimmer {
+            0% { transform: translateX(-100%); }
+            100% { transform: translateX(100%); }
         }
         
         .table {
@@ -156,8 +230,204 @@
              fill: var(--text-color) !important; 
          }
 
+        /* Mobile Optimizations */
+        @media (max-width: 768px) {
+            .container {
+                padding-left: var(--spacing-sm);
+                padding-right: var(--spacing-sm);
+            }
+            
+            .card {
+                margin-bottom: var(--spacing-md);
+            }
+            
+            .btn {
+                padding: var(--spacing-md) var(--spacing-lg);
+                font-size: var(--font-size-base);
+                min-height: 44px; /* Touch target optimization */
+            }
+            
+            .navbar-nav .nav-link {
+                padding: var(--spacing-md) var(--spacing-lg);
+                font-size: var(--font-size-lg);
+            }
+            
+            .progress {
+                height: 32px; /* Larger on mobile for better visibility */
+            }
+            
+            .table-responsive {
+                font-size: var(--font-size-sm);
+            }
+        }
+        
+        @media (max-width: 576px) {
+            .container {
+                padding-left: var(--spacing-xs);
+                padding-right: var(--spacing-xs);
+            }
+            
+            .card-body {
+                padding: var(--spacing-md);
+            }
+            
+            .btn {
+                width: 100%;
+                margin-bottom: var(--spacing-sm);
+            }
+            
+            .btn-group .btn {
+                width: auto;
+                margin-bottom: 0;
+            }
+        }
+        
+        /* Accessibility Improvements */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border: 0;
+        }
+        
+        /* Focus indicators */
+        .btn:focus,
+        .nav-link:focus,
+        .form-control:focus {
+            outline: 2px solid var(--primary);
+            outline-offset: 2px;
+        }
+        
+        /* Loading states */
+        .loading {
+            opacity: 0.6;
+            pointer-events: none;
+        }
+        
+        .loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 20px;
+            height: 20px;
+            margin: -10px 0 0 -10px;
+            border: 2px solid var(--primary);
+            border-top: 2px solid transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        /* Connection status indicator */
+        .connection-status {
+            position: fixed;
+            top: var(--spacing-md);
+            right: var(--spacing-md);
+            padding: var(--spacing-xs) var(--spacing-sm);
+            border-radius: var(--spacing-sm);
+            font-size: var(--font-size-xs);
+            font-weight: 500;
+            z-index: 1000;
+            transition: var(--transition-base);
+        }
+        
+        .connection-status.connected {
+            background-color: var(--success);
+            color: white;
+        }
+        
+        .connection-status.disconnected {
+            background-color: var(--danger);
+            color: white;
+        }
+        
+        /* Skeleton Loading States */
+        .skeleton {
+            background: linear-gradient(90deg, var(--card-border) 25%, rgba(255,255,255,0.5) 50%, var(--card-border) 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+            border-radius: var(--spacing-xs);
+        }
+        
+        .skeleton-card {
+            background: var(--card-bg);
+            border-radius: var(--card-border-radius);
+            padding: var(--spacing-lg);
+            box-shadow: var(--card-shadow);
+            border: 1px solid var(--card-border);
+        }
+        
+        .skeleton-line {
+            height: 1rem;
+            margin-bottom: var(--spacing-sm);
+            border-radius: var(--spacing-xs);
+        }
+        
+        .skeleton-title {
+            height: 1.5rem;
+            width: 60%;
+            margin-bottom: var(--spacing-lg);
+        }
+        
+        .skeleton-content {
+            height: 1rem;
+            width: 100%;
+        }
+        
+        .skeleton-content.short {
+            width: 70%;
+        }
+        
+        .skeleton-value {
+            height: 2.5rem;
+            width: 80%;
+            margin-bottom: var(--spacing-sm);
+        }
+        
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        
+        /* Data freshness indicator */
+        .data-freshness {
+            position: absolute;
+            top: var(--spacing-sm);
+            right: var(--spacing-sm);
+            font-size: var(--font-size-xs);
+            color: var(--muted-text);
+            background: var(--card-bg);
+            padding: var(--spacing-xs) var(--spacing-sm);
+            border-radius: var(--spacing-sm);
+            border: 1px solid var(--card-border);
+        }
+        
+        .data-freshness.fresh {
+            color: var(--success);
+        }
+        
+        .data-freshness.stale {
+            color: var(--warning);
+        }
+        
+        .data-freshness.old {
+            color: var(--danger);
+        }
+
     </style>
     
+    <!-- Expose page-level styles block AFTER base styles -->
+    {% block styles %}{% endblock %}
     {% block extra_head %}{% endblock %}
 </head>
 <body>
@@ -202,8 +472,11 @@
                         </a>
                     </li>
                 </ul>
-                <!-- Theme Toggle Button -->
-                <div class="d-flex">
+                <!-- Connection Status and Theme Toggle -->
+                <div class="d-flex align-items-center">
+                    <div id="connection-status" class="connection-status connected me-3">
+                        <i class="fas fa-circle me-1"></i>Live
+                    </div>
                     <i id="theme-toggle-button" class="fas fa-sun theme-toggle"></i>
                 </div>
             </div>
@@ -236,6 +509,9 @@
         // Handle status updates
         socket.on('status_update', function(data) {
             logDebug('Received status update', data);
+            
+            // Update data freshness timestamp
+            updateDataFreshness();
             
             // Update elements with data-realtime attributes
             document.querySelectorAll('[data-realtime]').forEach(element => {
@@ -283,6 +559,26 @@
                 }
             });
         });
+        
+        // Update data freshness indicator
+        function updateDataFreshness() {
+            const now = new Date();
+            const freshnessElements = document.querySelectorAll('.data-freshness');
+            
+            freshnessElements.forEach(element => {
+                element.textContent = `Updated ${now.toLocaleTimeString()}`;
+                element.className = 'data-freshness fresh';
+                
+                // Update freshness status based on time
+                setTimeout(() => {
+                    element.className = 'data-freshness stale';
+                }, 30000); // 30 seconds
+                
+                setTimeout(() => {
+                    element.className = 'data-freshness old';
+                }, 60000); // 1 minute
+            });
+        }
 
         // Handle graph updates
         socket.on('graph_update', function(data) {
@@ -322,11 +618,33 @@
         // Handle connection status
         socket.on('connect', function() {
             logDebug('Connected to server', { connected: true });
+            updateConnectionStatus('connected');
         });
 
         socket.on('disconnect', function() {
             logDebug('Disconnected from server', { connected: false });
+            updateConnectionStatus('disconnected');
         });
+        
+        // Update connection status indicator
+        function updateConnectionStatus(status) {
+            const indicator = document.getElementById('connection-status');
+            if (indicator) {
+                indicator.className = `connection-status ${status}`;
+                const icon = indicator.querySelector('i');
+                const text = indicator.querySelector('span') || indicator.childNodes[2];
+                
+                if (status === 'connected') {
+                    icon.className = 'fas fa-circle me-1';
+                    if (text) text.textContent = 'Live';
+                    else indicator.innerHTML = '<i class="fas fa-circle me-1"></i>Live';
+                } else {
+                    icon.className = 'fas fa-exclamation-circle me-1';
+                    if (text) text.textContent = 'Offline';
+                    else indicator.innerHTML = '<i class="fas fa-exclamation-circle me-1"></i>Offline';
+                }
+            }
+        }
     </script>
     
     <!-- Theme Switcher JS -->

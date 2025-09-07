@@ -781,7 +781,220 @@ def analyze_costs_between_refills(conn):
         # This is the original analysis code which will use refill_detected events from sensor data
         refills = get_all_refills(conn)
         logger.warning("Falling back to sensor-based refill detection - results may be less accurate")
-        # We would include the original analysis code here
+        
+        if len(refills) >= 2:
+            logger.info(f"Processing {len(refills)} sensor-detected refills")
+            analyzed_periods = 0
+            
+            # Analyze each period between refills using sensor data
+            for i in range(len(refills) - 1):
+                current_refill = refills[i]
+                next_refill = refills[i+1]
+                
+                start_date = current_refill['date']
+                end_date = next_refill['date']
+                
+                logger.info(f"Analyzing sensor period from {start_date} to {end_date}")
+                
+                # Calculate days between refills
+                start_dt = datetime.strptime(start_date, '%Y-%m-%d %H:%M:%S')
+                end_dt = datetime.strptime(end_date, '%Y-%m-%d %H:%M:%S')
+                days = (end_dt - start_dt).days
+                if days <= 0:
+                    logger.warning(f"Invalid date range: {start_date} to {end_date}")
+                    days = 1  # Prevent division by zero
+                
+                # Get readings during this period for supplementary data
+                readings = get_readings_between_dates(conn, start_date, end_date)
+                hdd_data = get_hdd_data(conn, start_date, end_date)
+                efficiency_data = get_efficiency_data(conn, start_date, end_date)
+                
+                # Get the reading just before the next refill to calculate actual consumption
+                c = conn.cursor()
+                c.execute('''
+                    SELECT litres_remaining FROM readings 
+                    WHERE date < ? AND litres_remaining IS NOT NULL 
+                    ORDER BY date DESC LIMIT 1
+                ''', (end_date,))
+                pre_refill_reading = c.fetchone()
+                if not pre_refill_reading:
+                    logger.warning(f"No reading found before refill at {end_date}, skipping period")
+                    continue
+                
+                pre_refill_level = pre_refill_reading[0]
+                
+                # Calculate consumption from sensor data (difference in tank levels)
+                # Note: consumption should be positive (tank level decreases over time)
+                consumption = current_refill['litres_remaining'] - pre_refill_level
+                if consumption <= 0:
+                    logger.warning(f"Invalid consumption calculation: {consumption}L from {current_refill['litres_remaining']}L to {pre_refill_level}L")
+                    logger.warning("This suggests invalid consumption data, skipping this period")
+                    continue
+                
+                # Additional validation: consumption should be reasonable (not more than tank capacity)
+                if consumption > 1500:  # Assuming max tank capacity is around 1500L
+                    logger.warning(f"Unrealistic consumption: {consumption}L, skipping this period")
+                    continue
+                
+                # Compute average price from real readings inside the period (pence -> pounds)
+                avg_price = 0.0
+                try:
+                    c = conn.cursor()
+                    c.execute('''
+                        SELECT AVG(current_ppl) FROM readings
+                        WHERE date >= ? AND date < ? AND current_ppl IS NOT NULL AND current_ppl > 0
+                    ''', (start_date, end_date))
+                    avg_ppl_pence = c.fetchone()[0] or 0
+                    avg_price = avg_ppl_pence / 100.0
+                except Exception as e:
+                    logger.warning(f"Failed to compute avg ppl from readings: {e}")
+                    avg_price = 0.0
+                
+                # If still no price, fall back to the start reading's ppl as a last resort
+                if avg_price <= 0 and readings:
+                    try:
+                        avg_price = (readings[0].get('current_ppl', 0) or 0) / 100.0
+                    except Exception:
+                        avg_price = 0.0
+                
+                total_cost = consumption * avg_price
+                
+                # Calculate days in average month from calendar
+                days_in_year = 366 if datetime.now().year % 4 == 0 else 365
+                days_in_month = days_in_year / 12
+                
+                # Create cost metrics
+                cost_metrics = {
+                    'total_cost': total_cost,
+                    'total_consumption': consumption,
+                    'average_ppl': round(avg_price * 100, 2),  # Convert back to pence for consistency
+                    'daily_cost': round(total_cost / days, 2),
+                    'daily_consumption': round(consumption / days, 2),
+                    'weekly_cost': round((total_cost / days) * 7, 2),
+                    'monthly_cost': round((total_cost / days) * days_in_month, 2),
+                    'period_days': days,
+                    'estimated_consumption': True
+                }
+                
+                # Calculate additional metrics using HDD and efficiency data
+                hdd_metrics = calculate_hdd_cost_metrics(cost_metrics, hdd_data)
+                efficiency_metrics = calculate_cost_metrics_with_efficiency(cost_metrics, readings, efficiency_data)
+                energy_metrics = calculate_energy_metrics(cost_metrics, efficiency_data)
+                
+                # Create period data
+                period_data = {
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'days': days,
+                    'total_consumption': cost_metrics['total_consumption'],
+                    'average_ppl': cost_metrics['average_ppl'],
+                    'total_cost': cost_metrics['total_cost'],
+                    'daily_cost': cost_metrics['daily_cost'],
+                    'weekly_cost': cost_metrics['weekly_cost'],
+                    'monthly_cost': cost_metrics['monthly_cost'],
+                    'refill_amount_liters': consumption,
+                    'refill_ppl': cost_metrics['average_ppl'],
+                    'refill_cost': total_cost,
+                    'refill_invoice': '',
+                    'refill_notes': 'Sensor-detected refill',
+                    'used_actual_cost': False,
+                    'estimated_consumption': True,
+                    'weather_metrics': hdd_metrics,
+                    'efficiency_metrics': efficiency_metrics,
+                    'energy_metrics': energy_metrics,
+                    'analysis_method': 'sensor_based'
+                }
+                
+                cost_analysis['refill_periods'].append(period_data)
+                analyzed_periods += 1
+                
+                # Collect data for historical averages
+                total_costs.append(total_cost)
+                total_consumptions.append(consumption)
+                daily_costs.append(cost_metrics['daily_cost'])
+                total_days += days
+                
+                # Collect efficiency and weather metrics
+                if hdd_metrics.get('cost_per_hdd'):
+                    all_cost_per_hdd.append(hdd_metrics['cost_per_hdd'])
+                if hdd_metrics.get('consumption_per_hdd'):
+                    all_consumption_per_hdd.append(hdd_metrics['consumption_per_hdd'])
+                if efficiency_metrics.get('cost_per_heat_unit'):
+                    all_cost_per_heat_unit.append(efficiency_metrics['cost_per_heat_unit'])
+                if energy_metrics.get('cost_per_kwh'):
+                    all_cost_per_kwh.append(energy_metrics['cost_per_kwh'])
+            
+            # Add current period (from last refill to now) if we have recent data
+            if len(refills) > 0:
+                last_refill = refills[-1]
+                current_date = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                
+                # Get current tank level
+                c = conn.cursor()
+                c.execute('''
+                    SELECT litres_remaining FROM readings 
+                    WHERE litres_remaining IS NOT NULL 
+                    ORDER BY date DESC LIMIT 1
+                ''')
+                current_reading = c.fetchone()
+                
+                if current_reading:
+                    current_level = current_reading[0]
+                    current_consumption = last_refill['litres_remaining'] - current_level
+                    
+                    if current_consumption > 0 and current_consumption < 1000:  # Reasonable consumption
+                        logger.info(f"Adding current period from {last_refill['date']} to now: {current_consumption:.1f}L consumed")
+                        
+                        # Calculate days since last refill
+                        last_refill_dt = datetime.strptime(last_refill['date'], '%Y-%m-%d %H:%M:%S')
+                        current_dt = datetime.now()
+                        current_days = (current_dt - last_refill_dt).days
+                        
+                        if current_days > 0:
+                            # Estimate cost for current period
+                            avg_price = last_refill.get('current_ppl', 0) / 100.0
+                            if avg_price <= 0:
+                                avg_price = 0.77  # Default price
+                            
+                            current_cost = current_consumption * avg_price
+                            current_daily_cost = current_cost / current_days
+                            
+                            # Create current period data
+                            current_period_data = {
+                                'start_date': last_refill['date'],
+                                'end_date': current_date,
+                                'days': current_days,
+                                'total_consumption': current_consumption,
+                                'average_ppl': avg_price * 100,
+                                'total_cost': current_cost,
+                                'daily_cost': current_daily_cost,
+                                'weekly_cost': current_daily_cost * 7,
+                                'monthly_cost': current_daily_cost * 30,
+                                'refill_amount_liters': current_consumption,
+                                'refill_ppl': avg_price * 100,
+                                'refill_cost': current_cost,
+                                'refill_invoice': '',
+                                'refill_notes': 'Current consumption period',
+                                'used_actual_cost': False,
+                                'estimated_consumption': True,
+                                'weather_metrics': {},
+                                'efficiency_metrics': {},
+                                'energy_metrics': {},
+                                'analysis_method': 'current_period'
+                            }
+                            
+                            cost_analysis['refill_periods'].append(current_period_data)
+                            analyzed_periods += 1
+                            
+                            # Add to historical averages
+                            total_costs.append(current_cost)
+                            total_consumptions.append(current_consumption)
+                            daily_costs.append(current_daily_cost)
+                            total_days += current_days
+            
+            logger.info(f"Successfully analyzed {analyzed_periods} refill periods using sensor data")
+        else:
+            logger.warning("Insufficient sensor-detected refills for analysis")
         
     # Calculate historical averages
     if total_costs:

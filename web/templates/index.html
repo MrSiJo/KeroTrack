@@ -2,377 +2,185 @@
 
 {% block title %}KeroTrack - Home{% endblock %}
 
-{% block styles %}
-<style>
-/* Card Styles */
-.card {
-    background-color: var(--bs-card-bg);
-    border: 1px solid var(--bs-border-color);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    transition: transform 0.2s, box-shadow 0.2s;
-}
-
-.card:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-}
-
-[data-theme='dark'] .card {
-    background-color: rgba(13, 17, 23, 0.3);
-    border-color: rgba(255, 255, 255, 0.1);
-}
-
-.card-title {
-    font-size: 1.2rem;
-    font-weight: 600;
-    margin-bottom: 1.5rem;
-    display: flex;
-    align-items: center;
-    color: var(--bs-heading-color);
-}
-
-.card-title i {
-    margin-right: 1rem;
-    opacity: 0.8;
-}
-
-/* Progress Bar Styles */
-.progress-container {
-    width: 100%;
-    margin-bottom: 1.5rem;
-}
-
-.progress {
-    height: 1.75rem;
-    background-color: rgba(0, 0, 0, 0.1);
-    border-radius: 1rem;
-    overflow: hidden;
-}
-
-[data-theme='dark'] .progress {
-    background-color: rgba(255, 255, 255, 0.1);
-}
-
-.progress-bar {
-    transition: width 0.5s ease, background-color 0.3s ease;
-    position: relative;
-    overflow: visible;
-    border-radius: 1rem;
-}
-
-.progress-text {
-    position: absolute;
-    right: 1rem;
-    color: #fff;
-    font-weight: 600;
-    line-height: 1.75rem;
-    font-size: 1rem;
-    text-shadow: 0 1px 2px rgba(0,0,0,0.2);
-}
-
-.progress-low {
-    background-color: #dc3545;
-    animation: pulse 2s infinite;
-}
-
-.progress-medium {
-    background-color: #ffc107;
-}
-
-.progress-good {
-    background-color: #198754;
-}
-
-.progress-normal {
-    background-color: #0d6efd;
-}
-
-@keyframes pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.8; }
-    100% { opacity: 1; }
-}
-
-/* Value Display Styles */
-.value-text {
-    font-size: 1.5rem;
-    font-weight: 600;
-    margin: 0;
-    display: inline-flex;
-    align-items: baseline;
-    color: var(--bs-heading-color);
-}
-
-.label-text {
-    font-size: 0.9rem;
-    color: var(--bs-secondary);
-    margin-left: 0.75rem;
-    font-weight: 500;
-}
-
-.card-content {
-    padding: 1.5rem;
-}
-
-.value-group {
-    display: inline-flex;
-    align-items: baseline;
-    margin-right: 2rem;
-    position: relative;
-}
-
-.value-group i {
-    margin-right: 0.75rem;
-    color: var(--bs-secondary);
-    font-size: 1.1rem;
-    width: 1.5rem;
-    text-align: center;
-}
-
-/* Quick Actions Styles */
-.btn {
-    padding: 0.75rem 1.5rem;
-    font-weight: 500;
-    border-radius: 0.5rem;
-    transition: all 0.2s;
-}
-
-.btn i {
-    margin-right: 0.75rem;
-    width: 1.25rem;
-    text-align: center;
-}
-
-.btn-primary {
-    background-color: #0d6efd;
-    border: none;
-}
-
-.btn-secondary {
-    background-color: #20c997;
-    border: none;
-}
-
-.btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-}
-
-/* Recent Trend Graph */
-#mini-graph {
-    min-height: 300px;
-    margin: 1rem 0;
-    border-radius: 0.5rem;
-    overflow: hidden;
-}
-
-/* Responsive Adjustments */
-@media (max-width: 768px) {
-    .value-group {
-        margin-right: 1rem;
-        margin-bottom: 1rem;
-    }
-    
-    .value-text {
-        font-size: 1.25rem;
-    }
-}
-
-/* Animation for Updates */
-@keyframes highlight {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); }
-}
-
-.highlight {
-    animation: highlight 0.5s ease-in-out;
-}
-</style>
-{% endblock %}
-
 {% block content %}
-<div class="row">
-    <!-- Card 1: Current Status -->
-    <div class="col-md-4 mb-4">
-        <div class="card h-100">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="fas fa-tachometer-alt"></i>Current Status
-                </h5>
-                <div class="progress-container mb-3">
-                    {% set pct = latest_reading.percentage_remaining|float(0) %}
-                    <div class="progress">
-                        <div class="progress-bar {% if pct <= 15 %}progress-low{% elif pct <= 40 %}progress-medium{% else %}progress-good{% endif %}"
-                            style="width: {{ pct }}%"
-                            aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100">
-                            <span class="progress-text">{{ "%.1f"|format(pct) }}%</span>
-                        </div>
+<!-- Modern Dashboard Grid -->
+<div class="dashboard-grid">
+    <!-- Current Status Card -->
+    <div class="metric-card">
+        <div class="data-freshness fresh">Just updated</div>
+        <div class="metric-header">
+            <div class="metric-icon">
+                <i class="fas fa-tachometer-alt"></i>
+            </div>
+            <h3 class="metric-title">Current Status</h3>
+        </div>
+        
+        {% if latest_reading %}
+        <div class="metric-content">
+            <!-- Oil Level Progress -->
+            <div class="progress-container mb-3">
+                {% set pct = latest_reading.percentage_remaining|float(0) %}
+                <div class="progress" role="progressbar" 
+                     aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100"
+                     aria-label="Oil tank level: {{ pct }}% full">
+                    <div class="progress-bar {% if pct <= 15 %}progress-low{% elif pct <= 40 %}progress-medium{% else %}progress-good{% endif %}"
+                        style="width: {{ pct }}%">
+                        <span class="progress-text">{{ "%.1f"|format(pct) }}%</span>
                     </div>
                 </div>
-                {% if latest_reading %}
-                <div class="card-content">
-                    <div class="row align-items-center">
-                        <div class="col-12">
-                            <div class="value-group mb-4">
-                                <i class="fas fa-oil-can"></i>
-                                <h4 class="value-text" data-realtime="litres_remaining">{{ "%.1f"|format(latest_reading.litres_remaining) }}L</h4>
-                                <span class="label-text">remaining</span>
-                            </div>
-                            <div class="value-group">
-                                <i class="fas fa-thermometer-half"></i>
-                                <h4 class="value-text" data-realtime="temperature">{{ "%.1f"|format(latest_reading.temperature) }}°C</h4>
-                                <small class="label-text">temperature</small>
-                            </div>
-                        </div>
-                    </div>
+            </div>
+            
+            <!-- Oil Remaining -->
+            <div class="metric-item">
+                <div class="metric-value" data-realtime="litres_remaining">{{ "%.1f"|format(latest_reading.litres_remaining) }}L</div>
+                <div class="metric-label">Oil Remaining</div>
+                <div class="metric-trend trend-neutral">
+                    <i class="fas fa-minus"></i>
+                    <span>Stable</span>
                 </div>
-                {% else %}
-                <div class="alert alert-warning">No current data available</div>
-                {% endif %}
+            </div>
+            
+            <!-- Temperature -->
+            <div class="metric-item">
+                <div class="metric-value" data-realtime="temperature">{{ "%.1f"|format(latest_reading.temperature) }}°C</div>
+                <div class="metric-label">Temperature</div>
             </div>
         </div>
+        {% else %}
+        <div class="alert alert-warning">No current data available</div>
+        {% endif %}
     </div>
 
-    <!-- Card 2: Usage Forecast -->
-    <div class="col-md-4 mb-4">
-        <div class="card h-100">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="fas fa-calendar-alt"></i>Usage Forecast
-                </h5>
-                {% if latest_analysis %}
-                <div class="card-content">
-                    <div class="progress-container">
-                        {% set days_remaining = latest_analysis.estimated_days_remaining|int(0) %}
-                        {% set max_days = 100 %}
-                        {% set percentage_days = min(days_remaining / max_days * 100, 100) %}
-                        <div class="progress">
-                            <div class="progress-bar {% if days_remaining <= 30 %}progress-low{% elif days_remaining <= 60 %}progress-medium{% else %}progress-good{% endif %}"
-                                data-realtime="days_remaining"
-                                data-realtime-class="{% if days_remaining <= 30 %}progress-low{% elif days_remaining <= 60 %}progress-medium{% else %}progress-good{% endif %}"
-                                style="width: {{ percentage_days }}%"
-                                aria-valuenow="{{ days_remaining }}"
-                                aria-valuemin="0"
-                                aria-valuemax="{{ max_days }}">
-                                <span class="progress-text" data-realtime="days_remaining_text">{{ days_remaining }} days</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="d-flex align-items-baseline">
-                        <div class="value-group">
-                            <i class="fas fa-calendar-day"></i>
-                            <small class="label-text me-2">Est. empty date:</small>
-                            <h4 class="value-text" data-realtime="empty_date">{{ latest_analysis.estimated_empty_date.split()[0] }}</h4>
-                        </div>
-                    </div>
+    <!-- Usage Forecast Card -->
+    <div class="metric-card">
+        <div class="data-freshness fresh">Just updated</div>
+        <div class="metric-header">
+            <div class="metric-icon">
+                <i class="fas fa-calendar-alt"></i>
+            </div>
+            <h3 class="metric-title">Usage Forecast</h3>
+        </div>
+        
+        {% if latest_analysis %}
+        <div class="metric-content">
+            <!-- Days Remaining -->
+            <div class="metric-item">
+                {% set days_remaining = latest_analysis.estimated_days_remaining|int(0) %}
+                <div class="metric-value" data-realtime="days_remaining">{{ days_remaining }}</div>
+                <div class="metric-label">Days Remaining</div>
+                <div class="metric-trend {% if days_remaining <= 30 %}trend-down{% elif days_remaining <= 60 %}trend-neutral{% else %}trend-up{% endif %}">
+                    <i class="fas fa-{% if days_remaining <= 30 %}exclamation-triangle{% elif days_remaining <= 60 %}minus{% else %}check-circle{% endif %}"></i>
+                    <span>{% if days_remaining <= 30 %}Low{% elif days_remaining <= 60 %}Medium{% else %}Good{% endif %}</span>
                 </div>
-                {% else %}
-                <div class="alert alert-warning">No analysis data available</div>
-                {% endif %}
+            </div>
+            
+            <!-- Estimated Empty Date -->
+            <div class="metric-item">
+                <div class="metric-value" data-realtime="empty_date">{{ latest_analysis.estimated_empty_date.split()[0] }}</div>
+                <div class="metric-label">Est. Empty Date</div>
             </div>
         </div>
+        {% else %}
+        <div class="alert alert-warning">No analysis data available</div>
+        {% endif %}
     </div>
 
-    <!-- Card 3: Cost Overview -->
-    <div class="col-md-4 mb-4">
-        <div class="card h-100">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="fas fa-pound-sign"></i>Cost Overview
-                </h5>
-                {% if latest_reading %}
-                <div class="card-content">
-                    <div class="value-group mb-4">
-                        <i class="fas fa-wallet"></i>
-                        <h4 class="value-text">£{{ "%.2f"|format(remaining_value) }}</h4>
-                        <small class="label-text">remaining value</small>
-                    </div>
-                    <div class="d-flex justify-content-between align-items-baseline">
-                        <div class="value-group">
-                            <i class="fas fa-shopping-cart"></i>
-                            <h4 class="value-text">
-                                {% if latest_reading.cost_to_fill_float is not none %}
-                                    £{{ "%.2f"|format(latest_reading.cost_to_fill_float) }}
-                                {% else %}
-                                    N/A
-                                {% endif %}
-                            </h4>
-                            <small class="label-text">to fill</small>
-                        </div>
-                        <div class="value-group">
-                            <i class="fas fa-gas-pump"></i>
-                            <h4 class="value-text">
-                                {% if latest_reading and latest_reading.cost_to_fill_float is not none %}
-                                    {{ "%.1f"|format(1200 - latest_reading.litres_remaining) }} L
-                                {% else %}
-                                    N/A
-                                {% endif %}
-                            </h4>
-                            <small class="label-text">needed</small>
-                        </div>
-                    </div>
+    <!-- Cost Overview Card -->
+    <div class="metric-card">
+        <div class="data-freshness fresh">Just updated</div>
+        <div class="metric-header">
+            <div class="metric-icon">
+                <i class="fas fa-pound-sign"></i>
+            </div>
+            <h3 class="metric-title">Cost Overview</h3>
+        </div>
+        
+        {% if latest_reading %}
+        <div class="metric-content">
+            <!-- Remaining Value -->
+            <div class="metric-item">
+                <div class="metric-value">£{{ "%.2f"|format(remaining_value) }}</div>
+                <div class="metric-label">Remaining Value</div>
+            </div>
+            
+            <!-- Cost to Fill -->
+            <div class="metric-item">
+                <div class="metric-value">
+                    {% if latest_reading.cost_to_fill_float is not none %}
+                        £{{ "%.2f"|format(latest_reading.cost_to_fill_float) }}
+                    {% else %}
+                        N/A
+                    {% endif %}
                 </div>
-                {% else %}
-                <div class="alert alert-warning">No cost data available</div>
-                {% endif %}
+                <div class="metric-label">Cost to Fill</div>
+            </div>
+            
+            <!-- Litres Needed -->
+            <div class="metric-item">
+                <div class="metric-value">
+                    {% if latest_reading and latest_reading.cost_to_fill_float is not none %}
+                        {{ "%.1f"|format(1200 - latest_reading.litres_remaining) }} L
+                    {% else %}
+                        N/A
+                    {% endif %}
+                </div>
+                <div class="metric-label">Litres Needed</div>
             </div>
         </div>
+        {% else %}
+        <div class="alert alert-warning">No cost data available</div>
+        {% endif %}
     </div>
 </div>
 
 <!-- Recent Trend Card -->
-<div class="row">
-    <div class="col-12 mb-4">
-        <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="fas fa-chart-line"></i>Recent Trend
-                </h5>
-                
-                {% if mini_graph %}
-                <div id="mini-graph" class="mt-3" data-graph="mini_graph"></div>
-                {% else %}
-                <div class="alert alert-warning mt-3">
-                    No trend data available
-                </div>
-                {% endif %}
-            </div>
+<div class="metric-card full-width-card mt-4">
+    <div class="metric-header">
+        <div class="metric-icon">
+            <i class="fas fa-chart-line"></i>
         </div>
+        <h3 class="metric-title">Recent Trend</h3>
     </div>
+    
+    {% if mini_graph %}
+    <div id="mini-graph" class="mt-3" data-graph="mini_graph" style="height: 300px;"></div>
+    {% else %}
+    <div class="alert alert-warning mt-3">
+        <i class="fas fa-exclamation-triangle me-2"></i>
+        No trend data available
+    </div>
+    {% endif %}
 </div>
 
 <!-- Quick Actions Card -->
-<div class="row">
-    <div class="col-12">
-        <div class="card">
-            <div class="card-body">
-                <h5 class="card-title">
-                    <i class="fas fa-bolt"></i>Quick Actions
-                </h5>
-                <div class="row mt-3">
-                    <div class="col-md-3 col-sm-6 mb-3">
-                        <a href="/historical" class="btn btn-primary w-100">
-                            <i class="fas fa-history"></i>View History
-                        </a>
-                    </div>
-                    <div class="col-md-3 col-sm-6 mb-3">
-                        <a href="/analysis" class="btn btn-secondary w-100">
-                            <i class="fas fa-calculator"></i>Full Analysis
-                        </a>
-                    </div>
-                    <div class="col-md-3 col-sm-6 mb-3">
-                        <a href="/settings" class="btn btn-primary w-100">
-                            <i class="fas fa-cog"></i>Settings
-                        </a>
-                    </div>
-                    <div class="col-md-3 col-sm-6 mb-3">
-                        <button class="btn btn-secondary w-100" onclick="refreshData()">
-                            <i class="fas fa-sync-alt"></i>Refresh
-                        </button>
-                    </div>
-                </div>
-            </div>
+<div class="metric-card full-width-card">
+    <div class="metric-header">
+        <div class="metric-icon">
+            <i class="fas fa-bolt"></i>
+        </div>
+        <h3 class="metric-title">Quick Actions</h3>
+    </div>
+    
+    <div class="row mt-3">
+        <div class="col-md-3 col-sm-6 mb-3">
+            <a href="/historical" class="btn btn-primary w-100" role="button" aria-label="View historical data">
+                <i class="fas fa-history me-2"></i>View History
+            </a>
+        </div>
+        <div class="col-md-3 col-sm-6 mb-3">
+            <a href="/analysis" class="btn btn-secondary w-100" role="button" aria-label="View detailed analysis">
+                <i class="fas fa-calculator me-2"></i>Full Analysis
+            </a>
+        </div>
+        <div class="col-md-3 col-sm-6 mb-3">
+            <a href="/settings" class="btn btn-primary w-100" role="button" aria-label="Open settings">
+                <i class="fas fa-cog me-2"></i>Settings
+            </a>
+        </div>
+        <div class="col-md-3 col-sm-6 mb-3">
+            <button class="btn btn-secondary w-100" onclick="refreshData()" aria-label="Refresh data">
+                <i class="fas fa-sync-alt me-2"></i>Refresh
+            </button>
         </div>
     </div>
 </div>
@@ -450,4 +258,4 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 </script>
 <script src="{{ url_for('static', filename='js/realtime-updates.js') }}"></script>
-{% endblock %} 
+{% endblock %}
