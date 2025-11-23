@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 
 """
-This script sends weekly summary notifications for KeroTrack.
-It connects to the database, calculates weekly statistics,
-and sends a notification using Apprise.
+Send weekly (and first-Sunday monthly) summaries for KeroTrack via Apprise.
+Refill-aware calculations keep usage totals honest even when the tank is topped up.
 """
 
 import sqlite3
@@ -20,6 +19,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), 'utils'))
 from db_connection import get_db_connection
 from config_loader import load_config, get_config_value
 
+
 def setup_logging(config):
     """Set up logging for the notifier script."""
     log_directory = get_config_value(config, 'logging', 'directory', default="logs")
@@ -33,7 +33,12 @@ def setup_logging(config):
     logging.getLogger().handlers = []
     logger.propagate = False
 
-    file_handler = TimedRotatingFileHandler(log_file, when="midnight", interval=1, backupCount=get_config_value(config, 'logging', 'retention_days', default=7))
+    file_handler = TimedRotatingFileHandler(
+        log_file,
+        when="midnight",
+        interval=1,
+        backupCount=get_config_value(config, 'logging', 'retention_days', default=7),
+    )
     stream_handler = logging.StreamHandler()
 
     log_format = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
@@ -45,13 +50,113 @@ def setup_logging(config):
     
     return logger
 
+
+def fetch_readings_between(conn, start_date, end_date):
+    """Fetch readings between two datetimes (inclusive) ordered by date."""
+    c = conn.cursor()
+    try:
+        c.execute(
+            """
+            SELECT date, litres_remaining, current_ppl, refill_detected, percentage_remaining
+            FROM readings
+            WHERE date BETWEEN ? AND ?
+            ORDER BY date ASC
+            """,
+            (start_date, end_date),
+        )
+        rows = c.fetchall()
+        return [
+            {
+                "date": row[0],
+                "litres_remaining": row[1],
+                "current_ppl": row[2],
+                "refill_detected": row[3],
+                "percentage_remaining": row[4],
+            }
+            for row in rows
+        ]
+    except sqlite3.Error as e:
+        logging.getLogger(__name__).error(f"Database error when fetching readings: {e}")
+        return []
+
+
+def calculate_refill_aware_usage(readings, refill_threshold):
+    """
+    Calculate usage for a period while being aware of refills.
+    Returns usage litres, refill flag/volume, and average ppl.
+    """
+    if len(readings) < 2:
+        return {
+            "usage_litres": None,
+            "had_refill": False,
+            "refill_volume": 0.0,
+            "average_ppl": 0.0,
+        }
+
+    total_decrease = 0.0
+    refill_volume = 0.0
+    had_refill = False
+
+    for i in range(1, len(readings)):
+        prev = readings[i - 1]
+        curr = readings[i]
+        delta = curr["litres_remaining"] - prev["litres_remaining"]
+
+        # Positive jump signals refill
+        if (curr["refill_detected"] == "y") or (delta >= refill_threshold):
+            had_refill = True
+            refill_volume += delta if delta > 0 else 0.0
+            continue
+
+        decrease = prev["litres_remaining"] - curr["litres_remaining"]
+        if decrease > 0:
+            total_decrease += decrease
+
+    start_litres = readings[0]["litres_remaining"]
+    end_litres = readings[-1]["litres_remaining"]
+    usage_without_refill = start_litres - end_litres
+    usage_litres = total_decrease if had_refill else usage_without_refill
+    usage_litres = max(usage_litres, 0.0)
+
+    ppl_values = [r["current_ppl"] for r in readings if r["current_ppl"] is not None]
+    average_ppl = (sum(ppl_values) / len(ppl_values)) if ppl_values else 0.0
+
+    return {
+        "usage_litres": usage_litres,
+        "had_refill": had_refill,
+        "refill_volume": refill_volume,
+        "average_ppl": average_ppl,
+    }
+
+
+def format_diff(current, previous, precision=2, threshold=0.1, suffix=""):
+    """Return a signed diff string or None if no data/change."""
+    if current is None or previous is None:
+        return None
+    diff = current - previous
+    if abs(diff) < threshold:
+        return "No change"
+    sign = "+" if diff > 0 else ""
+    return f"{sign}{diff:.{precision}f}{suffix}"
+
+
+def format_currency_diff(current, previous, currency_symbol):
+    """Format a currency diff with the sign before the symbol."""
+    diff_str = format_diff(current, previous)
+    if not diff_str or diff_str == "No change":
+        return diff_str
+    sign = ""
+    value = diff_str
+    if diff_str.startswith(("+", "-")):
+        sign, value = diff_str[0], diff_str[1:]
+    return f"{sign}{currency_symbol}{value}"
+
+
 def get_monthly_summary(conn, logger, config):
     """Calculate the summary for the previous full calendar month."""
     logger.info("Calculating last month's summary...")
     today = datetime.now()
-    # Go to the last day of the previous month
     last_day_of_prev_month = today.replace(day=1) - timedelta(days=1)
-    # Go to the first day of that same month
     first_day_of_prev_month = last_day_of_prev_month.replace(day=1)
     
     start_date = first_day_of_prev_month.strftime('%Y-%m-%d 00:00:00')
@@ -60,147 +165,128 @@ def get_monthly_summary(conn, logger, config):
     
     logger.info(f"Calculating summary for {month_name} ({start_date} to {end_date})")
 
-    c = conn.cursor()
     try:
-        # Get all readings for the month to calculate refills and average PPL
-        c.execute("SELECT litres_remaining, current_ppl FROM readings WHERE date BETWEEN ? AND ? ORDER BY date ASC", (start_date, end_date))
-        readings = c.fetchall()
+        readings = fetch_readings_between(conn, start_date, end_date)
 
         if len(readings) < 2:
             logger.warning("Not enough data to generate monthly summary.")
             return None
 
-        # Get start and end levels for the month
-        start_litres = readings[0][0]
-        end_litres = readings[-1][0]
-
-        # Calculate total refills during the month
-        total_refill_volume = 0
         refill_threshold = get_config_value(config, 'detection', 'refill_threshold', default=50)
-        for i in range(1, len(readings)):
-            prev_litres = readings[i-1][0]
-            curr_litres = readings[i][0]
-            volume_increase = curr_litres - prev_litres
-            if volume_increase >= refill_threshold:
-                logger.info(f"Detected monthly refill of {volume_increase:.2f}L")
-                total_refill_volume += volume_increase
-
-        # Correctly calculate usage: (start - end) + refills
+        usage_stats = calculate_refill_aware_usage(readings, refill_threshold)
+        start_litres = readings[0]["litres_remaining"]
+        end_litres = readings[-1]["litres_remaining"]
+        total_refill_volume = usage_stats["refill_volume"]
         total_usage = (start_litres - end_litres) + total_refill_volume
 
-        # If total_usage is negative, it indicates noise or small top-ups. Clamp to 0.
         if total_usage < 0:
             logger.warning(f"Calculated negative usage ({total_usage:.2f}L), clamping to 0.")
             total_usage = 0
 
-        # Calculate cost using the average PPL for the month
-        ppl_values = [r[1] for r in readings if r[1] is not None]
-        avg_ppl = sum(ppl_values) / len(ppl_values) if ppl_values else 0
+        avg_ppl = usage_stats["average_ppl"]
         total_cost = (total_usage * avg_ppl) / 100
-        currency_symbol = get_config_value(config, 'currency', 'symbol', default='£')
         
-        # Calculate percentage of tank used
         tank_capacity = get_config_value(config, 'tank', 'capacity')
         percentage_used = (total_usage / tank_capacity) * 100 if tank_capacity > 0 else 0
 
         return {
             "month_name": month_name,
-            "total_usage": f"{total_usage:.2f} L",
-            "percentage_used": f"~{percentage_used:.1f}% of tank",
-            "approx_cost": f"~{currency_symbol}{total_cost:.2f}"
+            "total_usage": total_usage,
+            "percentage_used": percentage_used,
+            "approx_cost": total_cost,
+            "refill_volume": total_refill_volume,
         }
 
     except sqlite3.Error as e:
         logger.error(f"Database error during monthly summary: {e}")
         return None
 
+
 def get_weekly_stats(conn, logger, config):
-    """
-    Get stats for the last 7 days from the analysis results.
-    """
-    logger.info("Fetching latest analysis and current stats...")
+    """Get refill-aware weekly stats and comparison with the prior week."""
+    logger.info("Fetching refill-aware weekly stats and current tank level...")
 
-    stats = {
-        'litres_used_last_7_days': 'N/A',
-        'latest_analysis': {}
-    }
+    now = datetime.now()
+    start_current_week = (now - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+    end_current_week = now.strftime('%Y-%m-%d %H:%M:%S')
+
+    start_prev_week = (now - timedelta(days=14)).strftime('%Y-%m-%d %H:%M:%S')
+    end_prev_week = (now - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+
+    refill_threshold = get_config_value(config, 'detection', 'refill_threshold', default=50)
+    currency_symbol = get_config_value(config, 'currency', 'symbol', default='£')
+    tank_capacity = get_config_value(config, 'tank', 'capacity', default=0)
+
+    current_week_readings = fetch_readings_between(conn, start_current_week, end_current_week)
+    prev_week_readings = fetch_readings_between(conn, start_prev_week, end_prev_week)
+
+    current_usage_stats = calculate_refill_aware_usage(current_week_readings, refill_threshold)
+    prev_usage_stats = calculate_refill_aware_usage(prev_week_readings, refill_threshold)
+
+    weekly_usage = current_usage_stats["usage_litres"]
+    current_avg_ppl = current_usage_stats["average_ppl"]
+    weekly_cost = (weekly_usage * current_avg_ppl) / 100 if weekly_usage is not None else None
+    weekly_pct_of_tank = (weekly_usage / tank_capacity) * 100 if tank_capacity and weekly_usage is not None else None
+
+    prev_week_usage = prev_usage_stats["usage_litres"]
+    prev_week_cost = (prev_week_usage * prev_usage_stats["average_ppl"]) / 100 if prev_week_usage is not None else None
+    prev_week_pct = (prev_week_usage / tank_capacity) * 100 if tank_capacity and prev_week_usage is not None else None
+
     c = conn.cursor()
-
+    latest_analysis = {}
     try:
-        c.execute("SELECT estimated_days_remaining, latest_analysis_date, avg_daily_consumption_l, estimated_empty_date FROM analysis_results ORDER BY latest_analysis_date DESC LIMIT 1")
+        c.execute(
+            """
+            SELECT estimated_days_remaining, latest_analysis_date, avg_daily_consumption_l, estimated_empty_date
+            FROM analysis_results
+            ORDER BY latest_analysis_date DESC LIMIT 1
+            """
+        )
         analysis_result = c.fetchone()
         if analysis_result:
-            avg_daily_consumption = analysis_result[2] if analysis_result[2] is not None else 0
-            stats['litres_used_last_7_days'] = round(avg_daily_consumption * 7, 2)
-            
-            stats['latest_analysis'] = {
+            latest_analysis = {
                 'estimated_days_remaining': analysis_result[0],
                 'analysis_date': analysis_result[1],
-                'avg_daily_consumption_l': avg_daily_consumption,
+                'avg_daily_consumption_l': analysis_result[2],
                 'estimated_empty_date': analysis_result[3]
             }
             logger.info(f"Latest analysis found from: {analysis_result[1]}")
-            logger.info(f"Calculated weekly usage: {stats['litres_used_last_7_days']} L (based on {avg_daily_consumption} L/day)")
-
-            # Fetch last week's analysis for trend calculation
-            last_week_date = (datetime.strptime(analysis_result[1], '%Y-%m-%d %H:%M:%S') - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
-            c.execute("SELECT avg_daily_consumption_l FROM analysis_results WHERE latest_analysis_date <= ? ORDER BY latest_analysis_date DESC LIMIT 1", (last_week_date,))
-            last_week_analysis = c.fetchone()
-
-            usage_trend = "N/A"
-            usage_trend_icon = "➖"
-            if last_week_analysis and last_week_analysis[0] is not None:
-                current_weekly_usage = stats['litres_used_last_7_days']
-                previous_weekly_usage = round(last_week_analysis[0] * 7, 2)
-                diff = current_weekly_usage - previous_weekly_usage
-                
-                if diff > 0.1:
-                    usage_trend_icon = "📈"
-                    usage_trend = f"+{diff:.2f} L"
-                elif diff < -0.1:
-                    usage_trend_icon = "📉"
-                    usage_trend = f"{diff:.2f} L"
-                else:
-                    usage_trend = "No change"
-                logger.info(f"Usage trend: Current {current_weekly_usage}L, Previous {previous_weekly_usage}L, Diff {diff:.2f}L")
-            
-            stats['usage_trend_icon'] = usage_trend_icon
-            stats['usage_trend'] = usage_trend
-
-        else:
-            logger.warning("No analysis results found to calculate weekly usage.")
-
     except sqlite3.Error as e:
         logger.error(f"Database error when fetching analysis results: {e}")
 
-    # Fetch latest PPL for cost calculation
-    try:
-        c.execute("SELECT current_ppl FROM readings ORDER BY date DESC LIMIT 1")
-        latest_ppl_res = c.fetchone()
-        weekly_cost = ""
-        if latest_ppl_res and latest_ppl_res[0] is not None:
-            latest_ppl = latest_ppl_res[0]
-            current_weekly_usage = stats.get('litres_used_last_7_days', 0)
-            if isinstance(current_weekly_usage, (int, float)):
-                cost = (current_weekly_usage * latest_ppl) / 100
-                currency_symbol = get_config_value(config, 'currency', 'symbol', default='£')
-                weekly_cost = f"~{currency_symbol}{cost:.2f}"
-                logger.info(f"Calculated weekly cost: {weekly_cost} based on PPL of {latest_ppl}")
-        stats['weekly_cost'] = weekly_cost
-    except sqlite3.Error as e:
-        logger.error(f"Database error when fetching PPL: {e}")
-
+    current_litres = None
+    current_percentage = None
     try:
         c.execute("SELECT litres_remaining, percentage_remaining FROM readings ORDER BY date DESC LIMIT 1")
         current_level = c.fetchone()
         if current_level:
-            stats['current_litres'] = round(current_level[0], 2)
-            stats['current_percentage'] = round(current_level[1], 2)
-            logger.info(f"Current tank level: {stats['current_litres']}L ({stats['current_percentage']}%)")
+            current_litres = round(current_level[0], 2)
+            current_percentage = round(current_level[1], 2)
+            logger.info(f"Current tank level: {current_litres}L ({current_percentage}%)")
     except sqlite3.Error as e:
         logger.error(f"Database error when fetching current level: {e}")
 
-    return stats
+    logger.info(
+        f"Weekly usage: {weekly_usage if weekly_usage is not None else 'N/A'} L "
+        f"(refill detected: {current_usage_stats['had_refill']}, "
+        f"refill volume: {current_usage_stats['refill_volume']:.2f} L)"
+    )
+
+    return {
+        'weekly_usage_l': weekly_usage,
+        'weekly_cost': weekly_cost,
+        'weekly_pct_of_tank': weekly_pct_of_tank,
+        'weekly_refill': current_usage_stats['had_refill'],
+        'weekly_refill_volume': current_usage_stats['refill_volume'],
+        'prev_week_usage_l': prev_week_usage,
+        'prev_week_cost': prev_week_cost,
+        'prev_week_pct_of_tank': prev_week_pct,
+        'latest_analysis': latest_analysis,
+        'current_litres': current_litres,
+        'current_percentage': current_percentage,
+        'currency_symbol': currency_symbol,
+    }
+
 
 def send_notification(stats, config, logger, test_mode=False, monthly_stats=None):
     """
@@ -213,7 +299,6 @@ def send_notification(stats, config, logger, test_mode=False, monthly_stats=None
 
     apobj = apprise.Apprise()
     for url in apprise_urls:
-        # Automatically append format=markdown to Gotify URLs for proper rendering
         if url.startswith("gotify://") and "format=markdown" not in url:
             separator = '&' if '?' in url else '?'
             modified_url = f"{url}{separator}format=markdown"
@@ -224,50 +309,71 @@ def send_notification(stats, config, logger, test_mode=False, monthly_stats=None
 
     title = "KeroTrack Weekly Summary"
     
-    # Safely get all the stats, providing a default value if a key is missing
-    weekly_usage = stats.get('litres_used_last_7_days', 'N/A')
-    weekly_cost_str = f"({stats.get('weekly_cost')})" if stats.get('weekly_cost') else ""
-    current_litres = stats.get('current_litres', 'N/A')
-    current_percentage = stats.get('current_percentage', 'N/A')
+    currency_symbol = stats.get('currency_symbol', '£')
+    weekly_usage = stats.get('weekly_usage_l')
+    weekly_cost = stats.get('weekly_cost')
+    weekly_pct = stats.get('weekly_pct_of_tank')
+
+    current_litres = stats.get('current_litres')
+    current_percentage = stats.get('current_percentage')
     
     latest_analysis = stats.get('latest_analysis', {})
-    days_remaining = latest_analysis.get('estimated_days_remaining', 'N/A')
+    days_remaining = latest_analysis.get('estimated_days_remaining')
     if isinstance(days_remaining, (float, int)):
         days_remaining = int(round(days_remaining))
 
     empty_date = latest_analysis.get('estimated_empty_date', 'N/A')
-    
-    usage_trend_icon = stats.get('usage_trend_icon', '➖')
-    usage_trend = stats.get('usage_trend', 'N/A')
-    
-    if usage_trend in ['N/A', 'No change']:
-        trend_line = f"- 📊 **Trend:** {usage_trend_icon} {usage_trend}"
-    else:
-        trend_line = f"- 📊 **Trend:** {usage_trend_icon} {usage_trend} vs last week"
 
+    trend_litres = format_diff(weekly_usage, stats.get('prev_week_usage_l'))
+    cost_trend = format_currency_diff(weekly_cost, stats.get('prev_week_cost'), currency_symbol)
+    pct_trend = format_diff(stats.get('weekly_pct_of_tank'), stats.get('prev_week_pct_of_tank'), precision=1, threshold=0.05, suffix="%")
 
-    # Format as a markdown list for better readability.
+    trend_segments = [seg for seg in (trend_litres, cost_trend, pct_trend) if seg and seg != "No change"]
+    trend_line = "No change" if not trend_segments else " / ".join(trend_segments) + " vs last week"
+
+    weekly_refill_notice = ""
+    if stats.get('weekly_refill') and stats.get('weekly_refill_volume', 0) > 0:
+        weekly_refill_notice = f"\n🛢️ **Refill detected:** approx +{stats['weekly_refill_volume']:.2f} L added"
+
+    weekly_usage_line = "N/A"
+    if weekly_usage is not None:
+        cost_str = f"~{currency_symbol}{weekly_cost:.2f}" if weekly_cost is not None else "N/A"
+        pct_str = f"~{weekly_pct:.1f}% of tank" if weekly_pct is not None else "N/A"
+        weekly_usage_line = f"{weekly_usage:.2f} L ({cost_str}, {pct_str})"
+
+    tank_line = "N/A"
+    if current_litres is not None and current_percentage is not None:
+        tank_line = f"{current_litres} L ({current_percentage}%)"
+
+    est_empty_line = f"{empty_date}"
+    if days_remaining is not None:
+        est_empty_line = f"{empty_date} ({days_remaining} days)"
+
     body = (
-        f"- ⛽️ **Tank Level:** {current_litres} L ({current_percentage}%)\n"
-        f"- 💧 **Weekly Usage:** {weekly_usage} L {weekly_cost_str}\n"
-        f"{trend_line}\n"
-        f"- 🗓️ **Est. Empty:** {empty_date} ({days_remaining} days remaining)"
+        f"⛽ **Tank Level:** {tank_line}\n"
+        f"💧 **Weekly Usage:** {weekly_usage_line}{weekly_refill_notice}\n"
+        f"📉 **Trend:** {trend_line}\n"
+        f"🗓️ **Est. Empty:** {est_empty_line}"
     )
 
-    # Append monthly summary if available
     if monthly_stats:
+        month_cost = f"~{currency_symbol}{monthly_stats['approx_cost']:.2f}"
+        month_pct = f"~{monthly_stats['percentage_used']:.1f}% of tank"
+        refill_line = ""
+        if monthly_stats.get("refill_volume", 0) > 0:
+            refill_line = f"\n• Refills: +{monthly_stats['refill_volume']:.2f} L added this month"
         body += (
             f"\n\n---\n"
-            f"**Last Month's Summary ({monthly_stats['month_name']}):**\n"
-            f"- **Total Usage:** {monthly_stats['total_usage']} ({monthly_stats['percentage_used']})\n"
-            f"- **Approx. Cost:** {monthly_stats['approx_cost']}"
+            f"📆 Last Month Summary ({monthly_stats['month_name']}):\n"
+            f"• Total Usage: {monthly_stats['total_usage']:.2f} L ({month_pct})\n"
+            f"• Approx. Cost: {month_cost}"
+            f"{refill_line}"
         )
 
     if test_mode:
         title = f"[TEST] {title}"
         logger.info("Test mode enabled. Sending test notification.")
 
-    # Notify with Markdown format specified, only if there are URLs.
     if len(apobj.urls()) > 0:
         if not apobj.notify(body=body, title=title, body_format=apprise.NotifyFormat.MARKDOWN):
             logger.error("Failed to send notification.")
@@ -275,6 +381,7 @@ def send_notification(stats, config, logger, test_mode=False, monthly_stats=None
             logger.info("Notification sent successfully.")
     else:
         logger.warning("No valid Apprise URLs to notify.")
+
 
 def main(test_mode=False):
     """Main function to generate and send notification."""
@@ -296,6 +403,7 @@ def main(test_mode=False):
 
         send_notification(stats, config, logger, test_mode, monthly_stats)
 
+
 if __name__ == "__main__":
     is_test = '--test' in sys.argv
-    main(test_mode=is_test) 
+    main(test_mode=is_test)

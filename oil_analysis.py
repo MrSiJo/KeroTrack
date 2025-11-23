@@ -79,6 +79,7 @@ EMA_ALPHA = get_config_value(config, 'analysis', 'ema_alpha')
 REFILL_THRESHOLD = get_config_value(config, 'detection', 'refill_threshold')
 LEAK_THRESHOLD = get_config_value(config, 'detection', 'leak_threshold')
 LEAK_DETECTION_PERIOD_DAYS = get_config_value(config, 'detection', 'leak_detection_period_days')
+TANK_CAPACITY = get_config_value(config, 'tank', 'capacity', default=0)
 
 # MQTT configuration
 MQTT_BROKER = get_config_value(config, 'mqtt', 'broker')
@@ -96,6 +97,11 @@ MQTT_TOPIC = get_topic_by_name(topics, "KTanalytics")
 DB_PATH = get_config_value(config, 'database', 'path', default=os.path.join('data', 'oil_data.db'))
 
 MINIMUM_CONSUMPTION_RATE = 0.01  # Liters per day
+MIN_HEATING_L = 0.5
+MAX_HEATING_L = 15.0
+
+def clamp(value, min_value, max_value):
+    return max(min_value, min(value, max_value))
 
 def get_table_columns(conn, table_name):
     c = conn.cursor()
@@ -275,10 +281,13 @@ def get_historical_consumption(conn):
     logger.info(f"Historical consumption calculation based on significant refills (>={REFILL_THRESHOLD}L)")
     return result if result is not None else 0
 
-def get_smoothed_daily_usage(conn, days=7, refill_threshold=100):
+def get_smoothed_daily_usage(conn, days=7, refill_threshold=100, daily_hw_l=None):
     readings = get_readings_last_n_days(conn, days+1)  # Need N+1 readings for N days
     if len(readings) < 2:
         return None
+    end_date_str = datetime.now().strftime('%Y-%m-%d')
+    start_date_str = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+    hdd_data = get_hdd_data(conn, start_date_str, end_date_str) if daily_hw_l is not None else {}
     daily_usages = []
     for i in range(1, len(readings)):
         prev = readings[i-1]
@@ -290,10 +299,99 @@ def get_smoothed_daily_usage(conn, days=7, refill_threshold=100):
         # Ignore negative usage (shouldn't happen except for refills)
         if used < 0:
             continue
-        daily_usages.append(used)
+        days_delta = (datetime.strptime(curr['date'], '%Y-%m-%d %H:%M:%S') - datetime.strptime(prev['date'], '%Y-%m-%d %H:%M:%S')).total_seconds() / 86400
+        if days_delta <= 0:
+            continue
+        per_day_use = used / days_delta
+        if daily_hw_l is not None:
+            curr_day = datetime.strptime(curr['date'], '%Y-%m-%d %H:%M:%S').strftime('%Y-%m-%d')
+            if hdd_data.get(curr_day, 0) == 0:
+                per_day_use = max(per_day_use, daily_hw_l)
+        daily_usages.append(per_day_use)
     if not daily_usages:
         return None
     return sum(daily_usages) / len(daily_usages)
+
+def compute_usage_stats(readings, hdd_data, daily_hw_l, refill_threshold):
+    """Calculate adjusted usage, separating hot-water-only days from heating days."""
+    total_days = 0
+    adjusted_usage_total = 0
+    heating_usage_total = 0
+    heat_day_count = 0
+    hw_day_count = 0
+
+    for i in range(1, len(readings)):
+        prev = readings[i-1]
+        curr = readings[i]
+        used = prev['litres_remaining'] - curr['litres_remaining']
+        if used < -refill_threshold:
+            continue
+        if used <= 0:
+            continue
+        curr_dt = datetime.strptime(curr['date'], '%Y-%m-%d %H:%M:%S')
+        prev_dt = datetime.strptime(prev['date'], '%Y-%m-%d %H:%M:%S')
+        days_delta = (curr_dt - prev_dt).total_seconds() / 86400
+        if days_delta <= 0:
+            continue
+        per_day_use = used / days_delta
+        curr_day = curr_dt.strftime('%Y-%m-%d')
+        curr_hdd = hdd_data.get(curr_day, 0)
+
+        if curr_hdd == 0:
+            per_day_use = max(per_day_use, daily_hw_l)
+            hw_day_count += days_delta
+        else:
+            heat_day_count += days_delta
+
+        adjusted_usage_total += per_day_use * days_delta
+        heating_component = max(per_day_use - daily_hw_l, 0) if curr_hdd > 0 else 0
+        heating_usage_total += heating_component * days_delta
+        total_days += days_delta
+
+    return {
+        "total_days": total_days,
+        "adjusted_usage_total": adjusted_usage_total,
+        "heating_usage_total": heating_usage_total,
+        "heat_day_count": heat_day_count,
+        "hw_day_count": hw_day_count,
+    }
+
+def compute_heating_usage(conn, days, daily_hw_l, refill_threshold):
+    readings = get_readings_last_n_days(conn, days + 1)
+    if len(readings) < 2:
+        return None
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days)
+    hdd_data = get_hdd_data(conn, start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d'))
+    stats = compute_usage_stats(readings, hdd_data, daily_hw_l, refill_threshold)
+    if stats["heat_day_count"] > 0:
+        return stats["heating_usage_total"] / stats["heat_day_count"]
+    return None
+
+def calculate_total_consumption(readings, refill_threshold):
+    """Calculate total consumption across readings, ignoring refill spikes."""
+    total = 0
+    for i in range(1, len(readings)):
+        prev = readings[i-1]
+        curr = readings[i]
+        used = prev['litres_remaining'] - curr['litres_remaining']
+        if used < -refill_threshold:
+            continue
+        if used > 0:
+            total += used
+    return total
+
+def get_latest_analysis_row(conn):
+    """Fetch the most recent analysis_results row if available."""
+    try:
+        c = conn.cursor()
+        c.execute("SELECT latest_analysis_date FROM analysis_results ORDER BY latest_analysis_date DESC LIMIT 1")
+        row = c.fetchone()
+        if row and row[0]:
+            return datetime.strptime(row[0], '%Y-%m-%d %H:%M:%S')
+    except Exception as exc:
+        logger.warning(f"Unable to fetch latest analysis row: {exc}")
+    return None
 
 def analyze_data(conn):
     """Main analysis function with both original and HDD-based calculations."""
@@ -309,41 +407,13 @@ def analyze_data(conn):
         refill_date = datetime.strptime(last_refill['date'], '%Y-%m-%d %H:%M:%S')
         days_since_refill = (datetime.now() - refill_date).days
         total_consumption = last_refill['litres_remaining'] - latest['litres_remaining']
-        
-        # Calculate smoothed daily usage (ignoring refill days)
-        smoothed_daily_usage = get_smoothed_daily_usage(conn, days=30, refill_threshold=REFILL_THRESHOLD)
-        
-        # Calculate average daily consumption since last refill (for reference)
-        if days_since_refill > 0 and total_consumption > 0:
-            avg_daily_consumption = total_consumption / days_since_refill
-        else:
-            avg_daily_consumption = get_historical_consumption(conn)
-            if avg_daily_consumption > 0:
-                logger.info(f"Using historical average consumption: {avg_daily_consumption:.2f} L/day")
-            else:
-                logger.warning("No significant historical refill cycles found for consumption calculation")
-        
-        # Use smoothed daily usage for projection if available
-        if smoothed_daily_usage and smoothed_daily_usage > 0:
-            days_until_empty = latest['litres_remaining'] / smoothed_daily_usage
-            empty_date = datetime.now() + timedelta(days=days_until_empty)
-        else:
-            days_until_empty = float('inf')
-            empty_date = None
-        
-        # HDD-based calculations
-        start_date = refill_date.strftime('%Y-%m-01')
-        end_date = datetime.now().strftime('%Y-%m-01')
-        hdd_data = get_hdd_data(conn, start_date, end_date)
-        
-        total_hdd = sum(hdd_data.values())
-        consumption_per_hdd = total_consumption / total_hdd if total_hdd > 0 else 0
-        
-        # Calculate the average HDD for the upcoming month
-        current_month = datetime.now().month
-        next_month = current_month + 1 if current_month < 12 else 1
-        upcoming_hdd = hdd_data.get(datetime(datetime.now().year, next_month, 1).strftime('%Y-%m-01'), 0)
-        
+        preferred_baseline_days = 60
+        minimum_baseline_days = 30
+        available_days = days_since_refill if days_since_refill > 0 else 0
+        lookback_days = min(preferred_baseline_days, max(minimum_baseline_days, available_days)) if available_days > 0 else minimum_baseline_days
+        analysis_start = max(refill_date, datetime.now() - timedelta(days=lookback_days))
+        analysis_period_days = max((datetime.now() - analysis_start).total_seconds() / 86400, 1)
+        previous_analysis_dt = get_latest_analysis_row(conn)
         # Estimate base consumption for scheduled hot water
         weekday_hot_water_sessions = 1 * 4  # 1 session per day, 4 weekdays
         weekend_hot_water_sessions = 2 * 3  # 2 sessions per day, 3 weekend days
@@ -357,32 +427,115 @@ def analyze_data(conn):
         # Add a small buffer for potential ad hoc water heating (e.g., 10% extra)
         buffer_factor = 1.1
         estimated_daily_hot_water_consumption = scheduled_daily_hot_water_consumption * buffer_factor
-        
-        # Estimate daily heating consumption based on upcoming HDD and seasonal factor
-        seasonal_factor = get_seasonal_heating_factor(next_month)
-        heating_consumption = consumption_per_hdd * upcoming_hdd * seasonal_factor / calendar.monthrange(datetime.now().year, next_month)[1]
-        
-        estimated_daily_consumption_hdd = heating_consumption + estimated_daily_hot_water_consumption
-
-        # HDD-based projection
-        if estimated_daily_consumption_hdd > 0:
-            days_until_empty_hdd = latest['litres_remaining'] / estimated_daily_consumption_hdd
-            empty_date_hdd = datetime.now() + timedelta(days=days_until_empty_hdd)
+        daily_hw_l = estimated_daily_hot_water_consumption
+        analysis_readings = get_readings_for_period(conn, analysis_start.strftime('%Y-%m-%d %H:%M:%S'), datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        analysis_hdd_data = get_hdd_data(conn, analysis_start.strftime('%Y-%m-%d'), datetime.now().strftime('%Y-%m-%d'))
+        period_consumption = calculate_total_consumption(analysis_readings, REFILL_THRESHOLD)
+        if period_consumption <= 0 and total_consumption > 0 and days_since_refill > 0:
+            period_consumption = total_consumption
+            analysis_period_days = max(days_since_refill, 1)
+        usage_stats = compute_usage_stats(analysis_readings, analysis_hdd_data, daily_hw_l, REFILL_THRESHOLD)
+        if usage_stats["total_days"] > 0:
+            adjusted_daily_consumption = usage_stats["adjusted_usage_total"] / usage_stats["total_days"]
         else:
-            days_until_empty_hdd = float('inf')
-            empty_date_hdd = None
+            adjusted_daily_consumption = max(period_consumption / analysis_period_days, daily_hw_l) if analysis_period_days > 0 else daily_hw_l
+        
+        # HDD-based calculations
+        start_date = refill_date.strftime('%Y-%m-01')
+        end_date = datetime.now().strftime('%Y-%m-01')
+        hdd_data = get_hdd_data(conn, start_date, end_date)
+        
+        total_hdd = sum(hdd_data.values())
+        consumption_per_hdd = total_consumption / total_hdd if total_hdd > 0 else 0
+        
+        # Calculate the average HDD for the upcoming month
+        current_month = datetime.now().month
+        next_month = current_month + 1 if current_month < 12 else 1
+        upcoming_hdd = hdd_data.get(datetime(datetime.now().year, next_month, 1).strftime('%Y-%m-01'), 0)
+        seasonal_factor = get_seasonal_heating_factor(next_month)
+        
+        weekly_readings = get_readings_last_n_days(conn, 7)
+        if len(weekly_readings) >= 10:
+            earliest = weekly_readings[0]
+            latest = weekly_readings[-1]
+            weekly_consumption = earliest['litres_remaining'] - latest['litres_remaining']
+            if weekly_consumption < 0 or (TANK_CAPACITY and weekly_consumption > TANK_CAPACITY):
+                weekly_consumption = 0
+                logger.info("Clamped negative or invalid weekly consumption to 0")
+            else:
+                logger.info("Using weekly consumption derived from readings")
+            adjusted_daily_consumption = max(weekly_consumption / 7, daily_hw_l)
+        else:
+            weekly_consumption = estimated_daily_hot_water_consumption * 7 * seasonal_factor
+            adjusted_daily_consumption = max(weekly_consumption / 7, daily_hw_l)
+            logger.info("Fallback triggered due to insufficient readings")
+            logger.info("Fallback: insufficient readings for weekly consumption, using baseline consumption")
+        
+        # Heating detection using recent behaviour
+        heating_7d = compute_heating_usage(conn, 7, daily_hw_l, REFILL_THRESHOLD)
+        heating_long = compute_heating_usage(conn, lookback_days, daily_hw_l, REFILL_THRESHOLD)
+        if heating_7d is not None and heating_long is not None:
+            heating_estimate = (heating_7d * 0.65) + (heating_long * 0.35)
+        elif heating_7d is not None:
+            heating_estimate = heating_7d
+        elif heating_long is not None:
+            heating_estimate = heating_long
+        else:
+            heating_estimate = 0
+
+        adjusted_recent_consumption = get_smoothed_daily_usage(conn, days=7, refill_threshold=REFILL_THRESHOLD, daily_hw_l=daily_hw_l)
+        if adjusted_recent_consumption is None:
+            adjusted_recent_consumption = adjusted_daily_consumption
+        surplus_l = max(adjusted_recent_consumption - daily_hw_l, 0)
+        heating_l = heating_estimate if heating_estimate > 0 else surplus_l
+        
+        today = datetime.now()
+        today_str = today.strftime('%Y-%m-%d')
+        hdd_start_range = (today - timedelta(days=7)).strftime('%Y-%m-%d')
+        recent_hdd_data = get_hdd_data(conn, hdd_start_range, today_str)
+        avg_7day_HDD = sum(recent_hdd_data.values()) / len(recent_hdd_data) if recent_hdd_data else 0
+        today_HDD = recent_hdd_data.get(today_str, 0) if recent_hdd_data else 0
+        if today_HDD == 0:
+            heating_l = 0
+        elif heating_l > 0:
+            if avg_7day_HDD > 0:
+                scale = clamp(today_HDD / avg_7day_HDD, 0.6, 1.6)
+                heating_l = heating_l * scale
+            heating_l = clamp(heating_l, MIN_HEATING_L, MAX_HEATING_L)
+        
+        estimated_daily_consumption_hdd = daily_hw_l + heating_l
+        estimated_daily_consumption_hdd = max(estimated_daily_consumption_hdd, daily_hw_l)
+
+        if today_HDD == 0:
+            estimated_daily_consumption_l = max(adjusted_daily_consumption, daily_hw_l)
+        else:
+            estimated_daily_consumption_l = max(adjusted_daily_consumption, daily_hw_l)
+
+        avg_daily_consumption_l = max(adjusted_daily_consumption, daily_hw_l)
+
+        if avg_daily_consumption_l > 0:
+            estimated_days_remaining = latest['litres_remaining'] / avg_daily_consumption_l
+            projected_cap = 400 if today_HDD > 0 else 700
+            estimated_days_remaining = min(estimated_days_remaining, projected_cap)
+            empty_date = datetime.now() + timedelta(days=estimated_days_remaining)
+        else:
+            estimated_days_remaining = float('inf')
+            empty_date = None
+
+        days_until_empty_hdd = estimated_days_remaining
+        empty_date_hdd = empty_date
         
         result.update({
             "days_since_refill": days_since_refill,
             "total_consumption_since_refill": round(total_consumption, 2),
-            "avg_daily_consumption_l": round(avg_daily_consumption, 2),
-            "estimated_days_remaining": round(days_until_empty, 1) if days_until_empty != float('inf') else "Unknown",
+            "avg_daily_consumption_l": round(avg_daily_consumption_l, 2),
+            "estimated_days_remaining": round(estimated_days_remaining, 1) if estimated_days_remaining != float('inf') else "Unknown",
             "estimated_empty_date": empty_date.strftime('%d/%m/%Y') if empty_date else "Unknown",
             "consumption_per_hdd_l": round(consumption_per_hdd, 3),
             "upcoming_month_hdd": round(upcoming_hdd, 1),
             "estimated_daily_consumption_hdd_l": round(estimated_daily_consumption_hdd, 2),
             "estimated_daily_hot_water_consumption_l": round(estimated_daily_hot_water_consumption, 2),
-            "estimated_daily_heating_consumption_l": round(heating_consumption, 2),
+            "estimated_daily_heating_consumption_l": round(heating_l, 2),
             "seasonal_heating_factor": round(seasonal_factor, 2),
             "remaining_days_empty_hdd": round(days_until_empty_hdd, 1) if days_until_empty_hdd != float('inf') else "Unknown",
             "remaining_date_empty_hdd": empty_date_hdd.strftime('%d/%m/%Y') if empty_date_hdd else "Unknown",
