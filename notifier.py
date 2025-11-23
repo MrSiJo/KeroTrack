@@ -130,14 +130,13 @@ def calculate_refill_aware_usage(readings, refill_threshold):
 
 
 def format_diff(current, previous, precision=2, threshold=0.1, suffix=""):
-    """Return a signed diff string or None if no data/change."""
+    """Return an absolute diff string (positive) or None if no data/change."""
     if current is None or previous is None:
         return None
     diff = current - previous
     if abs(diff) < threshold:
         return "No change"
-    sign = "+" if diff > 0 else ""
-    return f"{sign}{diff:.{precision}f}{suffix}"
+    return f"{abs(diff):.{precision}f}{suffix}"
 
 
 def format_currency_diff(current, previous, currency_symbol):
@@ -267,9 +266,9 @@ def get_weekly_stats(conn, logger, config):
         logger.error(f"Database error when fetching current level: {e}")
 
     logger.info(
-        f"Weekly usage: {weekly_usage if weekly_usage is not None else 'N/A'} L "
+        f"Weekly usage: {round(weekly_usage, 2) if weekly_usage is not None else 'N/A'} L "
         f"(refill detected: {current_usage_stats['had_refill']}, "
-        f"refill volume: {current_usage_stats['refill_volume']:.2f} L)"
+        f"refill volume: {round(current_usage_stats['refill_volume'], 2):.2f} L)"
     )
 
     return {
@@ -328,8 +327,30 @@ def send_notification(stats, config, logger, test_mode=False, monthly_stats=None
     cost_trend = format_currency_diff(weekly_cost, stats.get('prev_week_cost'), currency_symbol)
     pct_trend = format_diff(stats.get('weekly_pct_of_tank'), stats.get('prev_week_pct_of_tank'), precision=1, threshold=0.05, suffix="%")
 
-    trend_segments = [seg for seg in (trend_litres, cost_trend, pct_trend) if seg and seg != "No change"]
-    trend_line = "No change" if not trend_segments else " / ".join(trend_segments) + " vs last week"
+    direction = None
+    if weekly_usage is not None and stats.get('prev_week_usage_l') is not None:
+        diff_val = weekly_usage - stats.get('prev_week_usage_l')
+        if abs(diff_val) < 0.1:
+            direction = "flat"
+        elif diff_val > 0:
+            direction = "up"
+        else:
+            direction = "down"
+
+    if direction == "flat" or all(seg == "No change" or seg is None for seg in (trend_litres, cost_trend, pct_trend)):
+        trend_line = "➖ No meaningful change"
+    else:
+        arrow = "⬆️" if direction == "up" else "⬇️"
+        sign = "+" if direction == "up" else "-"
+        parts = []
+        if trend_litres and trend_litres != "No change":
+            parts.append(f"{sign}{trend_litres} L")
+        if cost_trend and cost_trend != "No change":
+            # cost_trend already includes currency symbol after sign formatting
+            parts.append(f"{sign}{cost_trend.lstrip('+-')}")
+        if pct_trend and pct_trend != "No change":
+            parts.append(f"{sign}{pct_trend}")
+        trend_line = f"{arrow} " + " / ".join(parts) + " vs last week"
 
     weekly_refill_notice = ""
     if stats.get('weekly_refill') and stats.get('weekly_refill_volume', 0) > 0:
@@ -349,26 +370,33 @@ def send_notification(stats, config, logger, test_mode=False, monthly_stats=None
     if days_remaining is not None:
         est_empty_line = f"{empty_date} ({days_remaining} days)"
 
-    body = (
-        f"⛽ **Tank Level:** {tank_line}\n"
-        f"💧 **Weekly Usage:** {weekly_usage_line}{weekly_refill_notice}\n"
-        f"📉 **Trend:** {trend_line}\n"
-        f"🗓️ **Est. Empty:** {est_empty_line}"
-    )
+    # Build weekly block with explicit line breaks for Gotify
+    weekly_lines = [
+        f"- ⛽ **Tank Level:** {tank_line}",
+        f"- 💧 **Weekly Usage:** {weekly_usage_line}",
+        f"- 📉 **Trend:** {trend_line}",
+        f"- 🗓️ **Est. Empty:** {est_empty_line}",
+    ]
+    if weekly_refill_notice:
+        weekly_lines.insert(2, weekly_refill_notice.strip())
+    weekly_block = "\n".join(weekly_lines)
+    body = weekly_block
 
     if monthly_stats:
         month_cost = f"~{currency_symbol}{monthly_stats['approx_cost']:.2f}"
         month_pct = f"~{monthly_stats['percentage_used']:.1f}% of tank"
-        refill_line = ""
+        refill_line = None
         if monthly_stats.get("refill_volume", 0) > 0:
-            refill_line = f"\n• Refills: +{monthly_stats['refill_volume']:.2f} L added this month"
-        body += (
-            f"\n\n---\n"
-            f"📆 Last Month Summary ({monthly_stats['month_name']}):\n"
-            f"• Total Usage: {monthly_stats['total_usage']:.2f} L ({month_pct})\n"
-            f"• Approx. Cost: {month_cost}"
-            f"{refill_line}"
-        )
+            refill_line = f"- **Refill:** +{monthly_stats['refill_volume']:.2f} L added this month"
+        monthly_lines = [
+            f"📆 **Last Month Summary ({monthly_stats['month_name']}):**",
+            f"- **Total Usage:** {monthly_stats['total_usage']:.2f} L ({month_pct})",
+            f"- **Approx. Cost:** {month_cost}",
+        ]
+        if refill_line:
+            monthly_lines.insert(2, refill_line)
+        monthly_block = "\n".join(monthly_lines)
+        body = f"{weekly_block}\n\n---\n{monthly_block}"
 
     if test_mode:
         title = f"[TEST] {title}"
