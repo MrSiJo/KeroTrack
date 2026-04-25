@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    @apply min-h-screen bg-bg-page text-text;
+  }
+
+  table.tabular,
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}

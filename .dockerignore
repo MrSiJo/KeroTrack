@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Node / SvelteKit
+node_modules/
+.svelte-kit/
+build/
+dist/
+
+# Local data + logs (mounted at runtime, not baked into images)
+data/
+logs/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+price_cache.json
+
+# v1 → v2 migration source (developer's local copy)
+legacy/
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+
+# Tooling
+.claude/
+.worktrees/
+.superpowers/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Tests / docs (not needed in runtime image)
+docs/
+assets/
+README.md
+LICENSE
