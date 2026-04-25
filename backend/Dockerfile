@@ -25,4 +25,4 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -fsS http://127.0.0.1:9176/api/health || exit 1
 
 ENTRYPOINT ["tini", "--"]
-CMD ["uvicorn", "kerotrack.main:app", "--host", "0.0.0.0", "--port", "9176"]
+CMD ["uvicorn", "--factory", "kerotrack.main:create_app", "--host", "0.0.0.0", "--port", "9176"]

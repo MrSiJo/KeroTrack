@@ -38,17 +38,16 @@ class Bootstrap(BaseSettings):
     log_level: str = "INFO"
     backend_port: int = 9176
     frontend_port: int = 9177
-    database_url: str = Field(
-        default="sqlite+aiosqlite:////app/data/kerotrack.db",
-        validation_alias="DATABASE_URL",
-    )
+    database_url: str = "sqlite+aiosqlite:////app/data/kerotrack.db"
     vite_api_url: str = "http://localhost:9176"
-    app_secret_key: str = Field(default="", validation_alias="APP_SECRET_KEY")
+    app_secret_key: str = ""
 
     @field_validator("app_secret_key")
     @classmethod
     def _validate_secret_key(cls, value: str) -> str:
-        # Allow empty during early phases — Phase 2.5 hardens this.
+        # Empty is permitted only for tests that explicitly opt out by passing
+        # a generated key via a test fixture. The auth middleware refuses to
+        # start without a valid key (see `Bootstrap.require_secret`).
         if value == "":
             return value
         normalised = value.strip()
@@ -63,6 +62,19 @@ class Bootstrap(BaseSettings):
                 "Generate one with `openssl rand -hex 32`."
             )
         return normalised
+
+    def require_secret(self) -> str:
+        """Return a non-empty `app_secret_key` or raise.
+
+        Called from the auth lifespan path so `pytest`-time imports without
+        the env var don't fail just from defining the model.
+        """
+        if not self.app_secret_key:
+            raise RuntimeError(
+                "APP_SECRET_KEY is required. Generate one with "
+                "`openssl rand -hex 32` and put it in `.env`."
+            )
+        return self.app_secret_key
 
 
 @lru_cache(maxsize=1)

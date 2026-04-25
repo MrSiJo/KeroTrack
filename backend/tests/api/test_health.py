@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[TestClient]:
     db = tmp_path / "health.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db.as_posix()}")
-    monkeypatch.setenv("APP_SECRET_KEY", "")
+    monkeypatch.setenv("APP_SECRET_KEY", "0" * 64)
     from kerotrack.bootstrap import reset_bootstrap_cache
     reset_bootstrap_cache()
 

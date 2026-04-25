@@ -18,7 +18,7 @@ pytestmark = pytest.mark.asyncio
 async def test_lifespan_starts_and_stops(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     db = tmp_path / "lifespan.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db.as_posix()}")
-    monkeypatch.setenv("APP_SECRET_KEY", "")
+    monkeypatch.setenv("APP_SECRET_KEY", "0" * 64)
     from kerotrack.bootstrap import reset_bootstrap_cache
     reset_bootstrap_cache()
 
