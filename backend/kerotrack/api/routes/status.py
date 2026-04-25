@@ -1,0 +1,51 @@
+"""GET /api/status — top-level snapshot for the Dashboard."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter, Request
+from sqlalchemy import desc, select
+
+from kerotrack.models.analysis_result import AnalysisResult
+from kerotrack.models.cost_analysis import CostAnalysis
+from kerotrack.models.reading import Reading
+
+router = APIRouter(prefix="/api/status", tags=["status"])
+
+
+@router.get("")
+async def get_status(request: Request) -> dict[str, Any]:
+    sf = request.app.state.session_factory
+    async with sf() as session:
+        latest_reading = (
+            await session.execute(
+                select(Reading).order_by(desc(Reading.date)).limit(1)
+            )
+        ).scalar_one_or_none()
+        latest_analysis = (
+            await session.execute(
+                select(AnalysisResult)
+                .order_by(desc(AnalysisResult.latest_reading_date))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        latest_cost = (
+            await session.execute(
+                select(CostAnalysis)
+                .order_by(desc(CostAnalysis.analysis_date))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+    def _row_to_dict(row: Any) -> dict[str, Any] | None:
+        if row is None:
+            return None
+        cols = row.__table__.columns.keys()
+        return {c: getattr(row, c) for c in cols}
+
+    return {
+        "reading": _row_to_dict(latest_reading),
+        "analysis": _row_to_dict(latest_analysis),
+        "cost": _row_to_dict(latest_cost),
+    }

@@ -26,6 +26,7 @@ dependencies = [
     "itsdangerous>=2.2",
     "cryptography>=43.0",
     "beautifulsoup4>=4.12",
+    "sse-starlette>=2.1",
 ]
 
 [project.optional-dependencies]
