@@ -747,10 +747,10 @@ These are the live risks to watch as phases execute. Each one is mitigated above
 | 4 — Scheduled jobs (parallel) | Done | (previous commit) |
 | 5 — API surface | Done | (previous commit) |
 | 6 — Migration CLI | Done | (this commit) |
-| 7a — Frontend scaffold + auth UI | Pending | |
-| 7b-d — Dashboard, Records, Settings (incl. change-password) | Pending | |
-| 7e-g — Trends, Forecast, Costs | Pending | |
-| 7h — MQTT page | Pending | |
+| 7a — Frontend scaffold + auth UI | Done | (this commit) |
+| 7b-d — Dashboard, Records, Settings (incl. change-password) | Done | (this commit) |
+| 7e-g — Trends, Forecast, Costs | Stubbed (this commit) — full ECharts visuals deferred |
+| 7h — MQTT page | Done (basic feed) | (this commit) — live SSE wiring deferred |
 | 8 — Cutover (operator-triggered, deferred) | Pending | |
 
 Update this table after each phase's deploy + verification step.
