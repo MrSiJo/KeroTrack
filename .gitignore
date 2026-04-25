@@ -1,0 +1,44 @@
+# Environments
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Node / SvelteKit
+node_modules/
+.svelte-kit/
+build/
+dist/
+.DS_Store
+*.tsbuildinfo
+
+# Local data + logs (never commit runtime artefacts)
+data/
+logs/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+price_cache.json
+
+# Editor / IDE
+.idea/
+.vscode/
+*.swp
+
+# Tooling
+.claude/
+.worktrees/
+
+# OS
+Thumbs.db
