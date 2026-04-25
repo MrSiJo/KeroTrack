@@ -57,6 +57,10 @@ If a deploy goes sideways: `git revert HEAD && git push && docker compose --env-
 
 **Feature parity with v1**, end-to-end, on the SvelteKit frontend, configured via the DB-backed settings, with the v1 SQLite DB migrated cleanly. That bar is what each phase contributes to. New behaviour beyond parity (forecast fan, calendar heatmap, scheduler reload-on-settings-change, audit log, SSE) is in scope because it's already designed; **multi-tank, auth, TLS, Postgres, and encrypted secrets are not.**
 
+### Source of truth for the v1 port
+
+The local v1 repo at `C:/code/KeroTrack` is the canonical source for the port. The deployed v1 at `root@172.16.0.14:/opt/KeroTrack/` lags behind it (verified 2026-04-25 — 4 of 5 core files differ). Phase 3 ports come from the local repo; the deployed system is only used as a *data source* (its SQLite DB and YAML config) and as the *cutover target* (it gets replaced).
+
 ### Open decision: SQLite provision
 
 §9.0 of the spec has the recommended approach: sanitised fixture in repo + full local copy in `legacy/` (gitignored) + production cutover via SSH snapshot. **This plan assumes that choice.** Anywhere a fixture is referenced, it's the sanitised one. If you'd rather skip the sanitisation step, only Phase 6's `scripts/build-fixture.py` deliverable changes.
@@ -522,16 +526,22 @@ Two waves, dispatched together in one message each. Each agent owns exactly its 
 
 Production cutover from v1 → v2 with rollback rehearsed.
 
+### Hosts (verified 2026-04-25)
+
+- **v1 LXC**: `root@172.16.0.14`, hostname `KeroTrack`. Runs `KeroTrack-MQTT.service` and `KeroTrack-Web.service` as system user `KeroTrack`. Cron entries: `/etc/cron.d/KeroTrack-Notifier` (Sun 08:00), `/etc/cron.weekly/KeroTrack-Analysis`, `/etc/cron.monthly/KeroTrack-CostAnalysis`.
+- **Docker host**: `root@172.16.0.83`. Runs v2 via `docker context use docker-host`.
+- **MQTT broker** (shared): `172.16.0.32:1883`.
+
 ### Steps
 
-1. **Rehearsal in dev.** With `legacy/` populated locally, run a full migration into a fresh container, hit every page in the dashboard, confirm KeroTrack-display still updates against the dev broker. Document any sharp edges.
+1. **Rehearsal in dev.** With `legacy/` populated, run a full migration into a fresh container, hit every page in the dashboard, confirm KeroTrack-display still updates against the dev broker. Document any sharp edges.
 2. **Snapshot v1 on the production host.**
    ```bash
-   ssh root@v1-host "tar czf /root/kerotrack-v1-$(date +%F).tgz /opt/KeroTrack/data /opt/KeroTrack/config"
-   scp root@v1-host:/root/kerotrack-v1-*.tgz root@172.16.0.83:/root/
+   ssh root@172.16.0.14 "tar czf /root/kerotrack-v1-$(date +%F).tgz /opt/KeroTrack/data /opt/KeroTrack/config"
+   scp root@172.16.0.14:/root/kerotrack-v1-*.tgz root@172.16.0.83:/root/
    ssh root@172.16.0.83 "mkdir -p /root/v1-snapshot && tar xzf /root/kerotrack-v1-*.tgz --strip-components=2 -C /root/v1-snapshot"
    ```
-3. **Stop v1.** `ssh root@v1-host "systemctl stop KeroTrack-Web KeroTrack-MQTT"`.
+3. **Stop v1.** `ssh root@172.16.0.14 "systemctl stop KeroTrack-Web KeroTrack-MQTT"`. Disable the cron entries: `ssh root@172.16.0.14 "rm /etc/cron.d/KeroTrack-Notifier /etc/cron.weekly/KeroTrack-Analysis /etc/cron.monthly/KeroTrack-CostAnalysis"`.
 4. **Migrate.** From the dev workstation with the docker-host context active:
    ```bash
    docker compose run --rm \
@@ -541,19 +551,20 @@ Production cutover from v1 → v2 with rollback rehearsed.
        --src-config /app/legacy/config.yaml \
        --report /app/data/migration-report.json
    ```
-5. **Inspect the report.** Sanity-check row counts, "defaulted", and "ignored" lists.
+5. **Inspect the report.** Sanity-check row counts (expect ~17 k readings, ~6.7 k analysis_results, 9 refill_periods, 0 actual_refill_costs as of last snapshot), "defaulted", and "ignored" lists.
 6. **Bring up v2.** `docker compose --env-file .env up -d --build`.
 7. **Verify.** `/api/health` shows `mqtt_connected: true` within one broadcast interval; trigger `POST /api/admin/jobs/notifier/run` with `{"test": true}` and confirm the Gotify notification arrives; visit each page and sanity-check; confirm KeroTrack-display still updates.
-8. **Decommission.** Remove `KeroTrack-Web.service`, `KeroTrack-MQTT.service`, `/etc/cron.weekly/KeroTrack-Analysis`, `/etc/cron.monthly/KeroTrack-CostAnalysis`, `/etc/cron.d/KeroTrack-Notifier`, `/opt/KeroTrack`, the `KeroTrack` system user. Keep the snapshot tarball for 30 days.
+8. **Decommission.** On `172.16.0.14`: `systemctl disable --now KeroTrack-Web KeroTrack-MQTT`, `rm /etc/systemd/system/KeroTrack-{Web,MQTT}.service`, `rm -rf /opt/KeroTrack`, `userdel KeroTrack`. Keep the snapshot tarball for 30 days. Optionally power off the LXC.
 
 ### Rollback procedure (rehearsed before cutover)
 
 ```bash
-docker compose down            # on docker-host context
-ssh root@v1-host "systemctl start KeroTrack-MQTT KeroTrack-Web"
+docker compose down            # on docker-host context (172.16.0.83)
+ssh root@172.16.0.14 "systemctl start KeroTrack-MQTT KeroTrack-Web"
+# and re-create cron entries from the snapshot if step 3 removed them
 ```
 
-v2 writes are isolated in the `kerotrack-data` named volume; v1 state is intact in `/opt/KeroTrack`. Rollback window is **as long as v1 systemd services remain installed** — keep them in place for one full notifier cycle (1 week) post-cutover.
+v2 writes are isolated in the `kerotrack-data` named volume; v1 state is intact in `/opt/KeroTrack` on `172.16.0.14`. Rollback window is **as long as v1 systemd services remain installed** — keep them in place for one full notifier cycle (1 week) post-cutover; only run step 8 (decommission) once that window expires cleanly.
 
 ### Exit criteria
 
