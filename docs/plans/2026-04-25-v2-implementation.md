@@ -740,7 +740,7 @@ These are the live risks to watch as phases execute. Each one is mitigated above
 | Phase | Status | Commit |
 |---|---|---|
 | 0 — Scaffold | Done | (this commit) |
-| 1 — Settings foundation | Pending | |
+| 1 — Settings foundation | Done | (this commit) |
 | 2 — DB engine, lifespan, health | Pending | |
 | 2.5 — Auth foundation (single-user, JobTrack pattern) | Pending | |
 | 3 — Data layer (parallel) | Pending | |

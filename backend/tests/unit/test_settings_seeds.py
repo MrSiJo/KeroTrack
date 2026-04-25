@@ -1,0 +1,47 @@
+"""Idempotent seed behaviour."""
+
+from __future__ import annotations
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
+from kerotrack.models.setting import Setting
+from kerotrack.settings.schema import SETTINGS_CATALOGUE
+from kerotrack.settings.seeds import seed_defaults
+
+
+pytestmark = pytest.mark.asyncio
+
+
+async def test_seed_inserts_all_keys_on_empty_db(sf: async_sessionmaker) -> None:
+    async with sf() as session:
+        inserted = await seed_defaults(session)
+    assert inserted == len(SETTINGS_CATALOGUE)
+    async with sf() as session:
+        keys = set((await session.execute(select(Setting.key))).scalars().all())
+    assert keys == set(SETTINGS_CATALOGUE.keys())
+
+
+async def test_seed_is_idempotent(sf: async_sessionmaker) -> None:
+    async with sf() as session:
+        first = await seed_defaults(session)
+    async with sf() as session:
+        second = await seed_defaults(session)
+    assert first == len(SETTINGS_CATALOGUE)
+    assert second == 0
+
+
+async def test_seed_does_not_overwrite_operator_change(
+    sf: async_sessionmaker,
+) -> None:
+    from kerotrack.settings.service import SettingsService
+
+    async with sf() as session:
+        await seed_defaults(session)
+    svc = SettingsService(sf)
+    await svc.set("tank.capacity_l", 9999)
+    async with sf() as session:
+        re_inserted = await seed_defaults(session)
+    assert re_inserted == 0
+    assert await svc.get("tank.capacity_l") == 9999.0
