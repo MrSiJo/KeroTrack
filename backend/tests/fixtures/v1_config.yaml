@@ -1,0 +1,49 @@
+
+database:
+  path: /opt/KeroTrack/data/KeroTrack_data.db
+logging:
+  directory: /opt/KeroTrack/logs
+  level: INFO
+notifications:
+  apprise_urls:
+    - gotify://host/token
+analysis:
+  co2_per_liter: 2.54
+  hdd_base_temperature: 15.5
+  reference_temperature: 15.0
+  thermal_expansion_coefficient: 0.0008
+  ema_alpha: 0.2
+alerts:
+  low_level_threshold: 20.0
+currency:
+  symbol: "£"
+tank:
+  capacity: 1225
+  length: 178.5
+  width: 75
+  height: 137
+  thermal_coefficient: 0.0007
+boiler:
+  model: WB
+  burner: RDB 2.2
+  fuel_rate: 2.33
+  co2_percentage: 11.8
+  input_kw: 22.1
+  output_kw: 21.5
+  fuel_pump_pressure: 140
+  efficiency: 99
+detection:
+  refill_threshold: 100
+  leak_threshold: 100
+mqtt:
+  broker: localhost
+  port: 1883
+  username: oil
+  password: oil
+  timeout_minutes: 35
+  broadcast_interval_minutes: 30
+  topics:
+    - name: KTreadings
+      topicname: oiltank/level
+    - name: KTanalytics
+      topicname: oiltank/analysis

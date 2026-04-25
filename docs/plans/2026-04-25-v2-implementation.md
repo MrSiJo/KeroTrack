@@ -745,8 +745,8 @@ These are the live risks to watch as phases execute. Each one is mitigated above
 | 2.5 — Auth foundation (single-user, JobTrack pattern) | Done | (this commit) |
 | 3 — Data layer (parallel) | Done | (this commit) |
 | 4 — Scheduled jobs (parallel) | Done | (previous commit) |
-| 5 — API surface | Pending | |
-| 6 — Migration CLI | Pending | |
+| 5 — API surface | Done | (previous commit) |
+| 6 — Migration CLI | Done | (this commit) |
 | 7a — Frontend scaffold + auth UI | Pending | |
 | 7b-d — Dashboard, Records, Settings (incl. change-password) | Pending | |
 | 7e-g — Trends, Forecast, Costs | Pending | |
