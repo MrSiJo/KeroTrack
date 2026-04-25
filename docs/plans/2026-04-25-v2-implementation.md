@@ -743,7 +743,7 @@ These are the live risks to watch as phases execute. Each one is mitigated above
 | 1 — Settings foundation | Done | (this commit) |
 | 2 — DB engine, lifespan, health | Done | (this commit) |
 | 2.5 — Auth foundation (single-user, JobTrack pattern) | Done | (this commit) |
-| 3 — Data layer (parallel) | Pending | |
+| 3 — Data layer (parallel) | Done | (this commit) |
 | 4 — Scheduled jobs (parallel) | Pending | |
 | 5 — API surface | Pending | |
 | 6 — Migration CLI | Pending | |

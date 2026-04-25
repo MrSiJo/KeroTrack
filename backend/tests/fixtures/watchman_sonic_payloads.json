@@ -1,0 +1,27 @@
+{
+  "canonical": {
+    "time": "2026-04-25 14:33:00",
+    "model": "Oil-SonicAdv",
+    "id": 12345,
+    "depth_cm": 50.0,
+    "temperature_C": 18.0,
+    "rssi": -58,
+    "status": 152
+  },
+  "warm_with_history": {
+    "time": "2026-04-26 14:33:00",
+    "model": "Oil-SonicAdv",
+    "id": 12345,
+    "depth_cm": 51.0,
+    "temperature_C": 19.5,
+    "status": 152
+  },
+  "post_refill": {
+    "time": "2026-05-01 09:00:00",
+    "model": "Oil-SonicAdv",
+    "id": 12345,
+    "depth_cm": 20.0,
+    "temperature_C": 14.0,
+    "status": 152
+  }
+}
