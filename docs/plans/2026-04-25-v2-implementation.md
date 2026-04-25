@@ -4,6 +4,11 @@
 **Status:** Approved for execution
 **Spec:** [`2026-04-25-v2-redesign.md`](./2026-04-25-v2-redesign.md) — read first
 **Design language:** [`ADR-0004`](../adr/0004-frontend-design-language.md)
+**Auth pattern:** [`ADR-0005`](../adr/0005-auth-pattern.md) — single-user, JobTrack-style
+
+**Phases:** 0 → 1 → 2 → **2.5 (auth)** → 3 → 4 → 5 → 6 → 7 → 8. Phase 2.5 (single-user
+JobTrack-style auth) is added per the operator's request for parity with the sibling
+projects and supersedes the original spec's "no auth in v2.0" stance.
 
 ---
 
@@ -55,7 +60,7 @@ If a deploy goes sideways: `git revert HEAD && git push && docker compose --env-
 
 ### What the MVP is
 
-**Feature parity with v1**, end-to-end, on the SvelteKit frontend, configured via the DB-backed settings, with the v1 SQLite DB migrated cleanly. That bar is what each phase contributes to. New behaviour beyond parity (forecast fan, calendar heatmap, scheduler reload-on-settings-change, audit log, SSE) is in scope because it's already designed; **multi-tank, auth, TLS, Postgres, and encrypted secrets are not.**
+**Feature parity with v1**, end-to-end, on the SvelteKit frontend, configured via the DB-backed settings, with the v1 SQLite DB migrated cleanly. Plus **single-user login** (ADR-0005) so the deployment matches JobTrack and FinTrack. That bar is what each phase contributes to. New behaviour beyond parity (forecast fan, calendar heatmap, scheduler reload-on-settings-change, audit log, SSE, login/setup) is in scope because it's already designed; **multi-tank, multi-user/role auth, API tokens, TLS, Postgres, and encrypted secrets are not.**
 
 ### Source of truth for the v1 port
 
@@ -230,6 +235,102 @@ backend/tests/api/test_health.py
 ### Commit
 
 `Phase 2 · async engine, schema bootstrap, lifespan, /api/health`
+
+---
+
+## Phase 2.5 — Auth foundation (single-user, JobTrack pattern)
+
+**Status:** Pending
+**Mode:** Sequential · single agent
+**Effort:** ~0.75 day
+**Depends on:** Phase 2 (engine + schema)
+**Blocks:** Phase 5 (API surface — auth gate must exist before routes go live), Phase 7 (frontend needs login/setup pages)
+**ADR:** [`0005`](../adr/0005-auth-pattern.md)
+
+### Objective
+
+Drop in JobTrack's auth pattern verbatim: argon2id password hashing, Starlette
+`SessionMiddleware`, custom `RequireAuthMiddleware` and `CSRFMiddleware`, first-time
+setup flow, login/logout/me routes. Single-user — the service refuses to create a
+second user. No password churn pollutes `setting_changes`; credentials live in their
+own `users` table.
+
+### Files created / modified
+
+```
+backend/kerotrack/models/user.py
+backend/kerotrack/security/__init__.py
+backend/kerotrack/security/crypto.py            # argon2id hash_password / verify_password
+backend/kerotrack/api/auth_middleware.py        # RequireAuthMiddleware + exempt set
+backend/kerotrack/api/csrf.py                   # CSRFMiddleware + generate_csrf_token
+backend/kerotrack/api/routes/auth.py            # /api/setup/status, /api/setup, /api/auth/{login,logout,me,change-password}
+backend/kerotrack/services/auth_service.py      # bootstrap_user, get_user, is_setup_complete, change_password
+backend/kerotrack/db_migrate.py                 # add `users` table (idempotent)
+backend/kerotrack/bootstrap.py                  # add APP_SECRET_KEY validator (mirrors JobTrack guardrails)
+backend/kerotrack/main.py                       # wire SessionMiddleware → RequireAuth → CSRF
+backend/pyproject.toml                          # + argon2-cffi, itsdangerous (transitive), cryptography
+backend/tests/unit/test_crypto.py
+backend/tests/unit/test_auth_service.py
+backend/tests/api/test_setup_flow.py
+backend/tests/api/test_auth_routes.py
+backend/tests/api/test_auth_middleware.py
+backend/tests/api/test_csrf_middleware.py
+.env.example                                    # APP_SECRET_KEY=
+```
+
+### Tests written first
+
+- **Crypto** — `hash_password` returns argon2id format; `verify_password` round-trips;
+  bad password → `False`; malformed hash → `False` (not an exception).
+- **Bootstrap validator** — empty / placeholder / short `APP_SECRET_KEY` raises at startup
+  with a clear "generate one with `openssl rand -hex 32`" message.
+- **Auth service** — `is_setup_complete` is `False` on empty DB, `True` after `bootstrap_user`;
+  bootstrapping a second user raises `409 already_setup`.
+- **Setup flow** — `GET /api/setup/status` works pre- and post-setup; `POST /api/setup`
+  with valid body creates the user and returns `{username}`; second `POST` is `409`.
+- **Login / me / logout** — successful login sets a session cookie and returns a
+  `csrf_token`; `/api/auth/me` echoes the user and the same token; logout clears the
+  session and subsequent calls 401.
+- **Change password** — `POST /api/auth/change-password` with `{old_password, new_password}`
+  verifies the old password, rehashes the new one, and writes back; subsequent login
+  with the old password fails (`401`); login with the new one succeeds. Wrong old
+  password returns `400 invalid_password` without leaking timing or which field was
+  wrong. The route requires an authenticated session and a valid CSRF token.
+- **Auth gate** — exempt paths return 2xx without a session; unexempt paths return
+  `401 auth_required` without a session and the proper response with one.
+- **CSRF** — `POST /api/settings/...` with a session but no `X-CSRF-Token` returns `403
+  csrf_missing`; with the right token, `200`. `/api/setup` and `/api/auth/login` are
+  CSRF-exempt (verified).
+- **Middleware order** — Session → RequireAuth → CSRF, asserted by inserting a probe
+  middleware that records dispatch order.
+
+### Implementation order
+
+1. `users` model and idempotent table creation in `db_migrate`.
+2. `security/crypto.py` (4 tiny functions).
+3. `services/auth_service.py` — single-user bootstrap, `verify_password` lookup.
+4. `bootstrap.py` — add `APP_SECRET_KEY` field with the JobTrack validators.
+5. Middlewares (`auth_middleware.py`, `csrf.py`) — straight ports.
+6. Routes (`api/routes/auth.py`).
+7. Wire into `main.py` lifespan in the load-bearing order documented in spec §6.6.
+
+### Exit criteria
+
+- All tests green.
+- On the host: a fresh deploy with an empty volume answers `GET /api/setup/status` →
+  `{"needs_setup": true}`. After `POST /api/setup` with `{"username": "admin", "password":
+  "..."}`, `GET /api/setup/status` returns `{"needs_setup": false}`.
+- `POST /api/auth/login` returns a session cookie + CSRF token; subsequent
+  `PUT /api/settings/tank.capacity_l` with the cookie + `X-CSRF-Token` succeeds, without
+  the token returns `403 csrf_missing`.
+- `POST /api/auth/change-password` with the cookie + CSRF token rotates the password;
+  the next login with the old credentials fails 401 and with the new one succeeds.
+- The host stack still reports `mqtt_connected: false` because MQTT isn't wired yet (Phase 3),
+  but `/api/health` is reachable without auth (it's exempt) and reports `db: ok`.
+
+### Commit
+
+`Phase 2.5 · single-user auth · argon2id, sessions, CSRF, setup/login/logout`
 
 ---
 
@@ -460,15 +561,32 @@ Then run `python scripts/build-fixture.py` once to generate `backend/tests/fixtu
 **Effort:** ~7.5 days wall-clock with parallelism
 **Depends on:** Phase 5 (API contract finalised)
 
-### 7a — Scaffold (sequential)
+### 7a — Scaffold + auth UI (sequential)
 
-**Owns:** entire `frontend/` tree, Tailwind config, ECharts theme registration, typed API client, layout chrome, theme store, sidebar.
+**Owns:** entire `frontend/` tree, Tailwind config, ECharts theme registration, typed API client, layout chrome, theme store, sidebar, **the login + setup pages and the auth guard.**
 
-**Brief:** Implement the design language locked in ADR-0004. Register the `kerotrack-dark` ECharts theme once at app boot. `lib/api.ts` is a typed fetch client matching Phase 5 routes. `lib/stores/{liveStatus,settings,theme}.ts` per spec §7.2. `Sidebar.svelte`, `KeyboardHints.svelte`, `ThemeToggle.svelte`. SSE wiring via `EventSource` against `/api/stream`. **No page content yet** — only chrome + the empty page shells with route stubs.
+**Brief:** Implement the design language locked in ADR-0004. Register the
+`kerotrack-dark` ECharts theme once at app boot. `lib/api.ts` is a typed fetch client
+matching Phase 5 routes — sends `credentials: "include"`, attaches `X-CSRF-Token` for
+mutating verbs, and calls a registered `onUnauthorised` callback on 401.
+`lib/stores/{auth,liveStatus,settings,theme}.ts` per spec §7.2 — `auth.ts` mirrors
+JobTrack's `AuthProvider` (boot calls `/api/setup/status`, then `/api/auth/me` if setup;
+exposes `user`, `needsSetup`, `csrfToken`, `login`, `logout`, `refresh`).
+`routes/+layout.svelte` is the auth guard: while loading shows a spinner, if
+`needsSetup` redirects to `/setup`, if no `user` redirects to `/login`, else renders the
+chrome (sidebar, header, theme toggle). `routes/login/+page.svelte` and
+`routes/setup/+page.svelte` follow the JobTrack visual cues but in the
+ADR-0004 palette. `Sidebar.svelte`, `KeyboardHints.svelte`, `ThemeToggle.svelte`. SSE
+wiring via `EventSource` against `/api/stream`. **No analytics/dashboard content yet**
+— only chrome, login/setup, and the empty page shells with route stubs.
 
-**Tests:** vitest for the typed client (mocked fetch), stores (theme persistence, liveStatus SSE parsing), sidebar keyboard nav.
+**Tests:**
+- vitest for the typed client (mocked fetch, CSRF header behaviour, 401 callback)
+- stores (theme persistence, auth setup-then-login flow, liveStatus SSE parsing)
+- sidebar keyboard nav
+- layout guard logic (mock the auth store, assert redirects)
 
-**Commit:** `Phase 7a · frontend scaffold · chrome, ECharts theme, typed API client, stores`
+**Commit:** `Phase 7a · frontend scaffold · chrome, auth pages, ECharts theme, typed API client, stores`
 
 ### Waves 7b–7h — pages in parallel
 
@@ -478,7 +596,7 @@ Two waves, dispatched together in one message each. Each agent owns exactly its 
 
 - **7b — Dashboard** (`src/routes/+page.svelte` + `lib/components/{TankSilhouette,StatusPills,Sparkline,StatCard}.svelte`)
 - **7c — Records** (`src/routes/records/+page.svelte` + `[date]/+page.svelte` + `lib/components/DataTable.svelte`)
-- **7d — Settings** (`src/routes/settings/+page.svelte` + `lib/components/{SettingsForm,SettingField}.svelte`, cron-next-fires preview via `cron-converter`)
+- **7d — Settings** (`src/routes/settings/+page.svelte` + `lib/components/{SettingsForm,SettingField,ChangePasswordForm}.svelte`, cron-next-fires preview via `cron-converter`, **a "Change password" section that POSTs to `/api/auth/change-password`** — see ADR-0005. Old password + new password + confirm; clears the form and shows a toast on 200; surfaces `400 invalid_password` inline.)
 
 **Wave 2 (3 agents in parallel, after Wave 1 lands):**
 
@@ -497,6 +615,7 @@ Two waves, dispatched together in one message each. Each agent owns exactly its 
   - Dashboard renders against a fixed API mock and shows the tank at the right level
   - Records edits a row and the change reflects after reload
   - Settings saves a diff and reads it back
+  - Settings → Change password rotates credentials; old password fails on next login, new one succeeds
   - Theme toggle persists across reload
   - Trends date range picker filters chart data
 
@@ -515,12 +634,31 @@ Two waves, dispatched together in one message each. Each agent owns exactly its 
 
 ---
 
-## Phase 8 — Cutover rehearsal and production migration
+## Phase 8 — Cutover rehearsal and production migration (operator-triggered)
 
-**Status:** Pending
-**Mode:** Sequential · single agent (operator-driven on the production host)
+**Status:** Pending — **deferred until the operator stops the v1 LXC**
+**Mode:** Sequential · operator-driven on the production host
 **Effort:** ~0.5 day rehearsal + ~1 hour cutover window
 **Depends on:** Phases 6 (migrator) and 7 (frontend MVP)
+
+### What "ready for cutover" means in this plan
+
+Phases 0–7 land an **empty-DB v2 deployment** with the JobTrack-style login flow on the
+docker host. The operator can hit `http://172.16.0.83:9177`, complete the first-time
+`/setup`, log in, see all pages render against the empty DB, and confirm the auth flow
+end-to-end. **No automated ingest happens** until the operator changes
+`mqtt.broker` from `localhost` to the real broker via the Settings page (or until
+cutover migrates the v1 settings).
+
+This phase is the operator-driven follow-up:
+
+1. Operator stops the v1 LXC (`172.16.0.14`).
+2. Operator runs the steps below to populate v2 with the snapshot.
+
+The implementation agent does **not** stop the LXC, run the migration, or decommission v1
+on the operator's behalf — those are explicit operator decisions. The agent has, by the
+end of Phase 6, made `python -m kerotrack.cli migrate-v1` reliable and idempotent against
+the local fixture and the local `legacy/` copy of the production DB.
 
 ### Objective
 
@@ -604,14 +742,15 @@ These are the live risks to watch as phases execute. Each one is mitigated above
 | 0 — Scaffold | Pending | |
 | 1 — Settings foundation | Pending | |
 | 2 — DB engine, lifespan, health | Pending | |
+| 2.5 — Auth foundation (single-user, JobTrack pattern) | Pending | |
 | 3 — Data layer (parallel) | Pending | |
 | 4 — Scheduled jobs (parallel) | Pending | |
 | 5 — API surface | Pending | |
 | 6 — Migration CLI | Pending | |
-| 7a — Frontend scaffold | Pending | |
-| 7b-d — Dashboard, Records, Settings | Pending | |
+| 7a — Frontend scaffold + auth UI | Pending | |
+| 7b-d — Dashboard, Records, Settings (incl. change-password) | Pending | |
 | 7e-g — Trends, Forecast, Costs | Pending | |
 | 7h — MQTT page | Pending | |
-| 8 — Cutover | Pending | |
+| 8 — Cutover (operator-triggered, deferred) | Pending | |
 
 Update this table after each phase's deploy + verification step.
