@@ -39,6 +39,10 @@ price_cache.json
 # Tooling
 .claude/
 .worktrees/
+.superpowers/
+
+# v1 → v2 migration source (developer's local copy of the production DB; never committed)
+legacy/
 
 # OS
 Thumbs.db
