@@ -306,6 +306,64 @@ async def test_estimated_days_remaining_capped_in_summer(
     assert payload["estimated_days_remaining"] <= 700.0
 
 
+async def test_avg_daily_uses_simple_weekly_delta_not_per_pair_sum(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    """v1 derives avg_daily_consumption_l from a simple 7-day delta
+    (earliest - latest), not from summing per-pair drops across all
+    readings. The per-pair walker over-counts every sensor jitter
+    (e.g. 200 → 150 → 200 reads as +50 L of bogus consumption), which
+    is why a noisy sensor with a real ~5 L/day draw would otherwise
+    yield triple-digit averages."""
+    async with sf() as session:
+        # Refill anchor a year ago.
+        session.add(
+            Reading(
+                date="2025-04-26 09:00:00",
+                id="probe",
+                litres_remaining=1000.0,
+                refill_detected="y",
+                leak_detected="n",
+            )
+        )
+        # Last 7 days: 200 readings/day (every ~7 min) with realistic
+        # ±5 L jitter around a slow 5 L/day downward trend.
+        base = 800.0
+        seed = 0
+        for day in range(7, 0, -1):
+            for slot in range(48):
+                seed += 1
+                jitter = ((seed * 37) % 11 - 5)  # deterministic ±5 L
+                date = f"2026-04-{20 + (7 - day):02d} {slot // 2:02d}:{(slot % 2) * 30:02d}:00"
+                session.add(
+                    Reading(
+                        date=date,
+                        id="probe",
+                        litres_remaining=base + jitter,
+                        refill_detected="n",
+                        leak_detected="n",
+                    )
+                )
+            base -= 5.0  # real consumption: 5 L/day
+        # Final reading "today".
+        session.add(
+            Reading(
+                date="2026-04-27 09:00:00",
+                id="probe",
+                litres_remaining=base,
+                refill_detected="n",
+                leak_detected="n",
+            )
+        )
+        await session.commit()
+
+    payload = await compute(sf, seeded_settings)
+    assert payload is not None
+    # Expect ~5 L/day, not the 100+ L/day a per-pair walker on jittery
+    # data would produce.
+    assert 1.0 <= payload["avg_daily_consumption_l"] <= 15.0
+
+
 async def test_per_pair_walker_ignores_refill_spikes(
     sf: async_sessionmaker, seeded_settings
 ) -> None:

@@ -363,22 +363,26 @@ async def compute(
 
     window_readings = await _readings_in_window(sf, analysis_start, latest_dt)
     window_hdd = await _hdd_in_window(sf, analysis_start, latest_dt)
-    window_consumption = _per_pair_total_consumption(
-        window_readings, snap.refill_threshold_l
-    )
-    if window_consumption <= 0 and total_consumption > 0:
-        window_consumption = total_consumption
-        analysis_period_days = max(days_since_anchor, 1.0)
 
-    stats = _usage_stats(window_readings, window_hdd, daily_hw_l, snap.refill_threshold_l)
-    if stats["total_days"] > 0:
-        adjusted_daily = stats["adjusted_total"] / stats["total_days"]
-    else:
-        adjusted_daily = (
-            max(window_consumption / analysis_period_days, daily_hw_l)
-            if analysis_period_days > 0
-            else daily_hw_l
+    # v1's `avg_daily_consumption_l` uses a SIMPLE 7-day delta
+    # (earliest_in_7d - latest), clamped at zero or > capacity, divided
+    # by 7. The per-pair walker in `_usage_stats` is only used for the
+    # heating-only component below — using it for the displayed average
+    # over-counts every sensor jitter (200→150→200 reads as +50 L of
+    # spurious consumption) and produces wild values like 200 L/day on
+    # quiet summer windows.
+    weekly_start = latest_dt - timedelta(days=7)
+    weekly_readings = await _readings_in_window(sf, weekly_start, latest_dt)
+    if len(weekly_readings) >= 2:
+        weekly_consumption = (
+            float(weekly_readings[0].litres_remaining or 0)
+            - float(weekly_readings[-1].litres_remaining or 0)
         )
+        if weekly_consumption < 0 or weekly_consumption > snap.capacity_l:
+            weekly_consumption = 0.0
+        adjusted_daily = max(weekly_consumption / 7.0, daily_hw_l)
+    else:
+        adjusted_daily = daily_hw_l
 
     # Recent-7-day smoothed daily, fallback to adjusted.
     recent_daily = await _smoothed_recent_daily(
