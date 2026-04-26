@@ -61,7 +61,9 @@ KEY_MAP: list[tuple[str, str | None]] = [
     ("mqtt.timeout_minutes", "mqtt.timeout_minutes"),
     ("mqtt.broadcast_interval_minutes", "mqtt.broadcast_interval_minutes"),
     ("notifications.apprise_urls", "notifications.apprise_urls"),
-    ("oil_prices.url", "prices.homefuelsdirect_url"),
+    # v1's oil_prices.url pointed at HomeFuelsDirect, which has since gone
+    # offline. v2 ships a YourNRG default; the v1 URL is ignored at migration.
+    ("oil_prices.url", None),
     ("alerts.low_level_threshold", "alerts.low_level_threshold_pct"),
     ("currency.symbol", "currency.symbol"),
 ]

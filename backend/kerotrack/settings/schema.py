@@ -286,11 +286,11 @@ def _entries() -> list[SettingDef]:
             "https://www.boilerjuice.com/heating-oil-prices-england/",
         ),
         SettingDef(
-            "prices.homefuelsdirect_url",
+            "prices.yournrg_url",
             "string",
             "prices",
-            "HomeFuelsDirect URL",
-            "https://homefuelsdirect.co.uk/home/heating-oil-prices/dorset",
+            "YourNRG URL",
+            "https://yournrg.co.uk/domestic/heating-oil-prices",
         ),
         SettingDef(
             "prices.cache_ttl_seconds",

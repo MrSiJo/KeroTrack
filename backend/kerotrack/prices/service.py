@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
 
 import httpx
 
@@ -46,14 +45,14 @@ class PriceService:
         ttl = int(await self._svc.get("prices.cache_ttl_seconds"))
         cache = PriceCache(self._cache_path, ttl_seconds=ttl)
         bj_url = str(await self._svc.get("prices.boilerjuice_url"))
-        hfd_url = str(await self._svc.get("prices.homefuelsdirect_url"))
+        yn_url = str(await self._svc.get("prices.yournrg_url"))
         client = await self._ensure_client()
         try:
             result = await fetch_current_price(
                 client=client,
                 cache=cache,
                 boilerjuice_url=bj_url,
-                homefuelsdirect_url=hfd_url,
+                yournrg_url=yn_url,
             )
         except Exception:  # noqa: BLE001
             logger.exception("price fetch failed")
@@ -63,7 +62,7 @@ class PriceService:
                 ppl=float(ppl) if ppl is not None else None,
                 source=cached.get("source") if cached else None,
                 boilerjuice_ppl=None,
-                homefuelsdirect=None,
+                yournrg=None,
                 used_cache=cached is not None,
             )
         self._last = result
