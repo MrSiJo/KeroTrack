@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import HeroRecords from "$lib/components/HeroRecords.svelte";
   import { api } from "$lib/api";
   import type { Reading } from "$lib/types/api";
 
@@ -47,7 +48,10 @@
   }
 </script>
 
-<div class="rounded-lg border border-border bg-bg-panel">
+<div class="space-y-6">
+  <HeroRecords size="full" />
+
+  <div class="rounded-lg border border-border bg-bg-panel">
   <header class="flex items-center justify-between border-b border-border px-4 py-3">
     <h2 class="text-sm font-semibold">Readings</h2>
     <div class="text-xs text-text-muted tabular-nums">
@@ -130,4 +134,5 @@
       disabled={offset + limit >= total || loading}>next →</button
     >
   </footer>
+  </div>
 </div>
