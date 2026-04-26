@@ -749,9 +749,9 @@ These are the live risks to watch as phases execute. Each one is mitigated above
 | 6 — Migration CLI | Done | `Phase 6` commit |
 | 7a — Frontend scaffold + auth UI | Done | `Phase 7` commit |
 | 7b-d — Dashboard, Records, Settings (incl. change-password) | Done | `Phase 7` + dashboard fixes `a92ea5d` |
-| 7e-g — Trends, Forecast, Costs | Stubbed | full ECharts visuals deferred (see §17) |
-| 7h — MQTT page | Done (basic feed) | live SSE wiring deferred |
-| 8 — Cutover (operator-driven) | **Mostly done** | data migrated `2026-04-26`, v1 LXC powered off; decommission tasks remaining (see §17) |
+| 7e-g — Trends, Forecast, Costs | Done | ECharts visuals shipped in `C1 commit` |
+| 7h — MQTT page | Done | live SSE wiring shipped in `C1 commit` |
+| 8 — Cutover (operator-driven) | **Mostly done** | data migrated `2026-04-26`, v1 LXC powered off; decommission tasks remaining (see §17 C3) |
 
 Update this table after each phase's deploy + verification step.
 
@@ -897,16 +897,21 @@ Frontend: **7 tests passing** (unchanged).
 
 ---
 
-## 17. Backlog (priority order)
+## 17. Backlog — DONE 2026-04-26
 
-The list is ranked: **(A)** backend-logic correctness comes first because
-those bugs silently produce wrong numbers in MQTT, the dashboard, and
-the Sunday Gotify summary. **(B)** cosmetic / UX items come next.
-**(C)** deferred-phase work (frontend ECharts, Phase 8 decommission)
-comes last. None of the items below change the on-the-wire MQTT
-contract — output shapes stay locked.
+The original backlog is fully delivered apart from operator-driven
+Phase-8 housekeeping (§C3). Five commits landed end-to-end:
 
-### A. Backend logic — highest priority
+- A1 (`c75df92`) — analysis algorithm restoration
+- A2-A5 (`68afffe`) — refill_periods writer, per-pair cost, HDD metrics, weighted averages
+- A6-A8 (`1d0fd4f`) — status byte logging, refill CLI, lifespan asserts MQTT + prices
+- B1-B5 (`a52b02f`) — light-mode palette, cron preview, schedule open, utcnow, retired key
+- C1+C2 (`627ecda`) — Phase 7e-7h ECharts visuals + Playwright smoke wiring
+
+Snapshot of what was originally outstanding, kept for the historical
+record. Items marked **DONE** were delivered in the commit listed.
+
+### A. Backend logic — DONE
 
 #### A1. Analysis: hot-water baseline + heating clamps + bounded look-back
 
@@ -1039,7 +1044,7 @@ come up. With the live MQTT loop and PriceService now part of the
 lifespan, the test should verify they're on `app.state` and the
 shutdown cleans them up. Trivial extension once A1–A4 stabilise.
 
-### B. Cosmetic / UX
+### B. Cosmetic / UX — DONE
 
 #### B1. Theme toggle is a visual no-op
 
@@ -1078,7 +1083,7 @@ flags it `"stale": true`. Cleanup migration:
 `DELETE FROM settings WHERE key = 'prices.homefuelsdirect_url'`.
 Harmless until then.
 
-### C. Deferred phase work
+### C. Deferred phase work — DONE except C3 (operator)
 
 #### C1. Frontend Phase 7e–7h ECharts visuals
 
