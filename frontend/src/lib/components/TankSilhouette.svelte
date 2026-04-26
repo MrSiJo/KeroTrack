@@ -84,8 +84,7 @@
       height={h - 4}
       rx="14"
       ry="14"
-      fill="#0a0f1c"
-      stroke="#334155"
+      style="fill: rgb(var(--bg-page)); stroke: rgb(var(--border-strong));"
       stroke-width="2"
     />
 
@@ -135,11 +134,10 @@
       x={w / 2}
       y={h / 2 - 6}
       text-anchor="middle"
-      fill="#e2e8f0"
       font-family="JetBrains Mono, monospace"
       font-size="32"
       font-weight="700"
-      style="paint-order: stroke; stroke: #0f172a; stroke-width: 4px;"
+      style="fill: rgb(var(--text-default)); paint-order: stroke; stroke: rgb(var(--bg-panel)); stroke-width: 4px;"
     >
       {pct.toFixed(0)}%
     </text>
@@ -148,10 +146,9 @@
         x={w / 2}
         y={h / 2 + 18}
         text-anchor="middle"
-        fill="#94a3b8"
         font-family="JetBrains Mono, monospace"
         font-size="13"
-        style="paint-order: stroke; stroke: #0f172a; stroke-width: 4px;"
+        style="fill: rgb(var(--text-muted)); paint-order: stroke; stroke: rgb(var(--bg-panel)); stroke-width: 4px;"
       >
         {Math.round(litres)} L{capacity ? ` / ${Math.round(capacity)}` : ""}
       </text>
