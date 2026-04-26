@@ -102,19 +102,28 @@ def map_yaml_to_settings(yaml: dict[str, Any]) -> MappedKeys:
             continue
         settings[v2_key] = value
 
-    # mqtt.topics — list of dicts with name + topicname.
+    # mqtt.topics — list of dicts. v1 had two shapes:
+    #   {name: "KTreadings", topicname: "oiltank/level"}   ← v1 publish targets
+    #   {name: "lilygo/.../RTL_433toMQTT/...", qos: 0}     ← v1 subscribe source
+    # In v2 `mqtt.topic_readings` is the SUBSCRIBE topic (spec §6.2). We pull
+    # it from the RTL_433-shaped entry. The publish topic stays at
+    # `oiltank/level` inside MqttPublisher's defaults.
     topics = yaml.get("mqtt", {}).get("topics", []) if isinstance(yaml, dict) else []
     name_to_v2 = {
-        "KTreadings": "mqtt.topic_readings",
         "KTanalytics": "mqtt.topic_analytics",
         "KTcostanalysis": "mqtt.topic_costanalysis",
     }
     for entry in topics:
         if not isinstance(entry, dict):
             continue
+        name = entry.get("name", "")
         topic_name = entry.get("topicname")
-        v2_key = name_to_v2.get(entry.get("name", ""))
+        v2_key = name_to_v2.get(name)
         if v2_key and topic_name:
             settings[v2_key] = topic_name
+        # The subscribe topic in v1 has no `topicname` — its `name` IS the
+        # MQTT topic, and contains "RTL_433toMQTT".
+        if "RTL_433toMQTT" in name:
+            settings["mqtt.topic_readings"] = name
 
     return MappedKeys(settings=settings, ignored=ignored, missing=missing)

@@ -1,16 +1,14 @@
 """FastAPI app factory + lifespan.
 
-Phase 5 wires the full API surface: health, auth, settings, status,
-readings, analysis, costs, refills, hdd, mqtt_feed, stream (SSE), admin.
-The lifespan now also stands up the publisher, scheduler and pubsub bus
-on app.state so the admin routes can drive them. The MQTT ingest task
-is left dormant until the operator points `mqtt.broker` at a real
-broker via Settings — keeping the host harmless for the empty-DB
-scaffold deploy.
+Lifespan brings up the engine + schema + settings, the SchedulerService,
+the SSE pubsub bus, and the live aiomqtt ingest task. The MQTT subscriber
+sits idle if `mqtt.broker` is `localhost` and reconnects automatically
+when settings change.
 """
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -35,19 +33,12 @@ from kerotrack.api.routes.stream import router as stream_router
 from kerotrack.bootstrap import get_bootstrap
 from kerotrack.db import init_engine, session_factory
 from kerotrack.db_migrate import ensure_schema
-from kerotrack.publish.mqtt_publisher import MqttPublisher
+from kerotrack.ingest.mqtt import MqttIngest
 from kerotrack.pubsub.bus import PubSubBus
 from kerotrack.scheduler.jobs import run_job
 from kerotrack.scheduler.service import SchedulerService
 from kerotrack.settings.seeds import seed_defaults
 from kerotrack.settings.service import SettingsService
-
-
-class _DormantClient:
-    """No-op MQTT publisher used until the operator wires a real broker."""
-
-    async def publish(self, topic: str, payload, *, qos: int = 0, retain: bool = False):
-        return None
 
 
 @asynccontextmanager
@@ -60,8 +51,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await seed_defaults(session)
     settings_service = SettingsService(sf)
     pubsub = PubSubBus()
-    publisher = MqttPublisher(client=_DormantClient())
     feed = MqttFeedRing()
+
+    mqtt = MqttIngest(
+        sf=sf, settings_service=settings_service, pubsub=pubsub, feed_ring=feed
+    )
+    settings_service.on_change("mqtt.*", mqtt.reconnect)
 
     async def _runner(name: str):
         return await run_job(name, app_state=app.state)
@@ -75,16 +70,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.session_factory = sf
     app.state.settings_service = settings_service
     app.state.pubsub = pubsub
-    app.state.publisher = publisher
+    app.state.publisher = mqtt.publisher
+    app.state.mqtt = mqtt
     app.state.scheduler = scheduler
     app.state.mqtt_feed = feed
     app.state.secret_key = boot.app_secret_key
 
     await scheduler.start()
+    mqtt_task = asyncio.create_task(mqtt.run())
     try:
         yield
     finally:
         scheduler.shutdown()
+        mqtt.stop()
+        try:
+            await asyncio.wait_for(mqtt_task, timeout=5.0)
+        except asyncio.TimeoutError:
+            mqtt_task.cancel()
         await engine.dispose()
 
 

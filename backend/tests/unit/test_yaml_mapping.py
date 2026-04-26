@@ -72,6 +72,8 @@ mqtt:
       topicname: oiltank/analysis
     - name: KTcostanalysis
       topicname: oiltank/cost_analysis
+    - name: lilygo/lilygo_lora32/RTL_433toMQTT/Oil-SonicAdv/5434428
+      qos: 0
 """
 
 
@@ -84,7 +86,7 @@ def test_every_mapped_key_lands_in_settings() -> None:
         "boiler.fuel_rate_l_per_h": 2.33,
         "mqtt.broker": "172.16.0.32",
         "mqtt.password": "oil",
-        "mqtt.topic_readings": "oiltank/level",
+        "mqtt.topic_readings": "lilygo/lilygo_lora32/RTL_433toMQTT/Oil-SonicAdv/5434428",
         "mqtt.topic_analytics": "oiltank/analysis",
         "mqtt.topic_costanalysis": "oiltank/cost_analysis",
         "alerts.low_level_threshold_pct": 20.0,

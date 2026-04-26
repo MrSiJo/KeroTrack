@@ -14,6 +14,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
+import aiomqtt
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
@@ -132,13 +133,35 @@ async def handle_payload(
     return processed
 
 
-class MqttIngest:
-    """Lifespan-task wrapper.
+class _AiomqttPublisherAdapter:
+    """Adapt an aiomqtt.Client to the duck-typed MqttPublisher interface."""
 
-    Phase 3 ships the orchestration shell. Phase 4 + 5 wire it into FastAPI's
-    lifespan once the analysis / scheduler / publisher pieces are in place.
-    The actual aiomqtt connect/loop is intentionally kept thin: most of the
-    hard logic is in `handle_payload` so it's directly testable.
+    def __init__(self) -> None:
+        self._client: aiomqtt.Client | None = None
+
+    def bind(self, client: aiomqtt.Client | None) -> None:
+        self._client = client
+
+    async def publish(
+        self, topic: str, payload: str | bytes, *, qos: int = 0, retain: bool = False
+    ) -> Any:
+        if self._client is None:
+            logger.debug("publish dropped — no broker connected")
+            return None
+        try:
+            await self._client.publish(topic, payload, qos=qos, retain=retain)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("publish failed: %s", exc)
+
+
+class MqttIngest:
+    """Live aiomqtt subscriber + publisher loop.
+
+    The publisher adapter is created up-front so `app.state.publisher` can
+    be wired into the lifespan synchronously; we bind the live client onto
+    it once the connection succeeds. The subscriber loop reconnects on
+    error with exponential backoff and survives settings changes via
+    `reconnect()` (called by the SettingsService change subscriber).
     """
 
     def __init__(
@@ -146,32 +169,143 @@ class MqttIngest:
         *,
         sf: async_sessionmaker,
         settings_service,
-        publisher: MqttPublisher,
         pubsub: PubSubBus,
+        feed_ring=None,
     ) -> None:
         self._sf = sf
         self._settings = settings_service
-        self._publisher = publisher
         self._pubsub = pubsub
+        self._feed = feed_ring
         self._stop = asyncio.Event()
+        self._reload = asyncio.Event()
         self.connected = False
+        self._adapter = _AiomqttPublisherAdapter()
+        self.publisher = self._build_publisher()
+
+    def _build_publisher(self) -> MqttPublisher:
+        # Topic strings come from settings at run time inside the loop, but
+        # the publisher's defaults match the v1 contract. Lifespan refreshes
+        # publish topics whenever they change.
+        return MqttPublisher(client=self._adapter)
+
+    async def _refresh_publisher_topics(self) -> None:
+        topic_level = await self._settings.get("mqtt.topic_readings_publish") \
+            if False else "oiltank/level"
+        topic_analysis = str(await self._settings.get("mqtt.topic_analytics"))
+        topic_costanalysis = str(await self._settings.get("mqtt.topic_costanalysis"))
+        # Always publish to v1-compatible /level topic for KeroDisplay/HA.
+        self.publisher = MqttPublisher(
+            client=self._adapter,
+            topic_level=topic_level,
+            topic_analysis=topic_analysis,
+            topic_costanalysis=topic_costanalysis,
+        )
 
     def stop(self) -> None:
         self._stop.set()
+        self._reload.set()
 
     async def reconnect(self, key: str, old: Any, new: Any) -> None:
-        # Settings change for mqtt.* — drop the loop so the outer task
-        # reconnects with the fresh credentials. Phase 4/5 wires this in.
-        logger.info("MQTT setting %s changed, scheduling reconnect", key)
-        self.connected = False
-        self._stop.set()
-        # Caller responsible for restart — see lifespan integration in Phase 4/5.
+        logger.info("MQTT setting %s changed → triggering reconnect", key)
+        self._reload.set()
 
-    async def handle(self, raw: dict[str, Any]) -> dict[str, Any]:
-        return await handle_payload(
-            raw,
-            sf=self._sf,
-            settings_service=self._settings,
-            publisher=self._publisher,
-            pubsub=self._pubsub,
-        )
+    async def run(self) -> None:
+        backoff = 1.0
+        while not self._stop.is_set():
+            self._reload.clear()
+            try:
+                broker = str(await self._settings.get("mqtt.broker"))
+                port = int(await self._settings.get("mqtt.port"))
+                username = str(await self._settings.get("mqtt.username")) or None
+                password = str(await self._settings.get("mqtt.password")) or None
+                subscribe_topic = str(await self._settings.get("mqtt.topic_readings"))
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("failed to load mqtt settings: %s", exc)
+                await asyncio.sleep(5)
+                continue
+
+            if not broker or broker.lower() == "localhost":
+                # Sit idle until the operator points at a real broker.
+                logger.info("mqtt.broker=%r — ingest idle until reconfigured", broker)
+                self.connected = False
+                self._adapter.bind(None)
+                try:
+                    await asyncio.wait_for(self._reload.wait(), timeout=30)
+                except asyncio.TimeoutError:
+                    pass
+                continue
+
+            await self._refresh_publisher_topics()
+            logger.info(
+                "MQTT connecting to %s:%s as %s, subscribing %s",
+                broker, port, username, subscribe_topic,
+            )
+            try:
+                async with aiomqtt.Client(
+                    hostname=broker,
+                    port=port,
+                    username=username,
+                    password=password,
+                    keepalive=60,
+                ) as client:
+                    self._adapter.bind(client)
+                    self.connected = True
+                    backoff = 1.0
+                    await client.subscribe(subscribe_topic, qos=0)
+
+                    consumer = asyncio.create_task(self._consume(client))
+                    waiter = asyncio.create_task(self._reload.wait())
+                    stopper = asyncio.create_task(self._stop.wait())
+                    done, pending = await asyncio.wait(
+                        {consumer, waiter, stopper},
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                    for t in pending:
+                        t.cancel()
+                    for t in done:
+                        if t is consumer and t.exception():
+                            raise t.exception()  # type: ignore[misc]
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("MQTT loop error: %s — backing off %.1fs", exc, backoff)
+                self.connected = False
+                self._adapter.bind(None)
+                try:
+                    await asyncio.wait_for(self._reload.wait(), timeout=backoff)
+                except asyncio.TimeoutError:
+                    pass
+                backoff = min(backoff * 2, 60.0)
+                continue
+            finally:
+                self.connected = False
+                self._adapter.bind(None)
+
+        logger.info("MQTT ingest loop stopped")
+
+    async def _consume(self, client: aiomqtt.Client) -> None:
+        async for msg in client.messages:
+            try:
+                body = msg.payload.decode() if isinstance(msg.payload, (bytes, bytearray)) else str(msg.payload)
+                try:
+                    raw = json.loads(body)
+                except json.JSONDecodeError:
+                    logger.debug("Non-JSON MQTT payload on %s: %r", msg.topic, body[:200])
+                    continue
+
+                if self._feed is not None:
+                    self._feed.append(topic=str(msg.topic), payload=raw)
+
+                # Only RTL_433 Watchman Sonic payloads carry the depth_cm/temperature_C
+                # we expect. Skip anything else (e.g. our own publishes echoed back
+                # if subscribed to a wildcard).
+                if "depth_cm" not in raw or "temperature_C" not in raw:
+                    continue
+
+                await handle_payload(
+                    raw,
+                    sf=self._sf,
+                    settings_service=self._settings,
+                    publisher=self.publisher,
+                    pubsub=self._pubsub,
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("error handling MQTT message")
