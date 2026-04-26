@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import desc, select
+from sqlalchemy import asc, desc, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kerotrack.clock import local_now, local_now_str, parse_local
@@ -55,15 +55,6 @@ async def _snapshot(svc: SettingsService) -> _Snapshot:
     )
 
 
-def _parse_dt(s: str | None) -> datetime | None:
-    if not s:
-        return None
-    try:
-        return datetime.strptime(s, "%Y-%m-%d %H:%M:%S")
-    except ValueError:
-        return None
-
-
 def _seasonal_heating_factor(month: int) -> float:
     # Match v1's piecewise model: winter highest, summer lowest.
     if month in {12, 1, 2}:
@@ -73,90 +64,118 @@ def _seasonal_heating_factor(month: int) -> float:
     return 0.3
 
 
+async def _latest_reading(sf: async_sessionmaker) -> Reading | None:
+    async with sf() as session:
+        return (
+            await session.execute(
+                select(Reading).order_by(desc(Reading.date)).limit(1)
+            )
+        ).scalar_one_or_none()
+
+
+async def _earliest_reading(sf: async_sessionmaker) -> Reading | None:
+    async with sf() as session:
+        return (
+            await session.execute(
+                select(Reading).order_by(asc(Reading.date)).limit(1)
+            )
+        ).scalar_one_or_none()
+
+
+async def _latest_refill_anchor(
+    sf: async_sessionmaker,
+) -> Reading | None:
+    """Find the most recent refill marker across the entire DB.
+
+    v1's approach was the same — the refill row is the anchor for "since
+    last refill" totals. Limiting the query to the last N readings (as the
+    first port did) breaks once the most recent refill scrolls outside the
+    window, which is the common case after a few weeks of measurements.
+    """
+    async with sf() as session:
+        return (
+            await session.execute(
+                select(Reading)
+                .where(Reading.refill_detected == "y")
+                .order_by(desc(Reading.date))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+
+def _days_between(later: datetime, earlier: datetime) -> float:
+    return max((later - earlier).total_seconds() / 86400.0, 0.0)
+
+
 async def compute(
     sf: async_sessionmaker, svc: SettingsService
 ) -> dict[str, Any] | None:
-    """Compute the analysis payload from the latest readings.
+    """Compute the analysis payload.
 
-    Returns None if there isn't enough data to analyse (e.g. fresh DB).
+    The window for `total_consumption_since_refill` is anchored to the most
+    recent refill marker in the entire `readings` table. If no refill has
+    ever been detected we fall back to the earliest stored reading and
+    return `days_since_refill=None` to signal "no anchor".
     """
-    snap = await _snapshot(svc)
-    async with sf() as session:
-        readings = (
-            await session.execute(
-                select(Reading).order_by(desc(Reading.date)).limit(200)
-            )
-        ).scalars().all()
-
-    if len(readings) < 2:
+    latest = await _latest_reading(sf)
+    earliest = await _earliest_reading(sf)
+    if latest is None or earliest is None or latest.date == earliest.date:
         return None
 
-    # Sort ascending for windowed maths.
-    readings = list(reversed(readings))
-    latest = readings[-1]
-
-    # Find most recent refill — bound the window to the latest refill.
-    refill_idx = None
-    for i in range(len(readings) - 1, -1, -1):
-        if readings[i].refill_detected == "y":
-            refill_idx = i
-            break
-    window = readings[refill_idx:] if refill_idx is not None else readings
-
-    if len(window) < 2:
-        window = readings
-
-    first = window[0]
-    # All reading.date strings are naive local time — attach the configured
-    # zone so subtractions across DST boundaries stay correct.
-    first_dt = parse_local(first.date) or local_now()
     latest_dt = parse_local(latest.date) or local_now()
-    days = max((latest_dt - first_dt).total_seconds() / 86400.0, 0.0)
-    total_consumption = max(
-        (first.litres_remaining or 0) - (latest.litres_remaining or 0),
-        0.0,
-    )
+    refill = await _latest_refill_anchor(sf)
+    if refill is not None and refill.date != latest.date:
+        anchor = refill
+        anchor_is_refill = True
+    else:
+        anchor = earliest
+        anchor_is_refill = False
+
+    anchor_dt = parse_local(anchor.date) or latest_dt
+    days = _days_between(latest_dt, anchor_dt)
+    days_since_refill = int(days) if anchor_is_refill else None
+
+    anchor_litres = float(anchor.litres_remaining or 0)
+    latest_litres = float(latest.litres_remaining or 0)
+    total_consumption = max(anchor_litres - latest_litres, 0.0)
+
     avg_daily = (
-        total_consumption / days
-        if days > 0
-        else MIN_CONSUMPTION_L_PER_DAY
+        total_consumption / days if days > 0 else MIN_CONSUMPTION_L_PER_DAY
     )
     avg_daily = max(avg_daily, MIN_CONSUMPTION_L_PER_DAY)
 
-    estimated_days_remaining = (latest.litres_remaining or 0) / avg_daily
+    estimated_days_remaining = latest_litres / avg_daily
 
-    # HDD lookups for the most recent month already in the DB.
+    # HDD lookups: most recent month for upcoming_month_hdd; for
+    # consumption_per_hdd we want the cumulative HDD over the window.
     async with sf() as session:
         hdd_rows = (
             await session.execute(
-                select(HddDatum).order_by(desc(HddDatum.date)).limit(12)
+                select(HddDatum).order_by(desc(HddDatum.date)).limit(24)
             )
         ).scalars().all()
+
     upcoming_month_hdd = float(hdd_rows[0].hdd) if hdd_rows else 0.0
+    months_in_window = max(1, int(days // 30))
+    window_hdd_total = sum(
+        float(r.hdd or 0) for r in hdd_rows[:months_in_window]
+    )
     consumption_per_hdd = (
-        total_consumption
-        / sum(float(r.hdd or 0) for r in hdd_rows[: max(1, int(days // 30))])
-        if hdd_rows
-        else 0.0
+        total_consumption / window_hdd_total if window_hdd_total > 0 else 0.0
     )
 
     factor = _seasonal_heating_factor(latest_dt.month)
-    estimated_daily_consumption_hdd = avg_daily * factor + avg_daily * (1 - factor) * 0.5
-    estimated_daily_hot_water = avg_daily * (1 - factor) * 0.5
     estimated_daily_heating = avg_daily * factor
+    estimated_daily_hot_water = avg_daily * (1 - factor) * 0.5
+    estimated_daily_consumption_hdd = (
+        estimated_daily_heating + estimated_daily_hot_water
+    )
 
     if avg_daily > 0:
-        empty_date = (latest_dt + timedelta(days=estimated_days_remaining)).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        empty_dt = latest_dt + timedelta(days=estimated_days_remaining)
+        empty_date = empty_dt.strftime("%Y-%m-%d %H:%M:%S")
     else:
         empty_date = None
-
-    days_since_refill = (
-        (latest_dt - (parse_local(window[0].date) or latest_dt)).days
-        if refill_idx is not None
-        else None
-    )
 
     payload: dict[str, Any] = {
         "latest_reading_date": latest.date,
