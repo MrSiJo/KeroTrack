@@ -751,7 +751,7 @@ These are the live risks to watch as phases execute. Each one is mitigated above
 | 7b-d — Dashboard, Records, Settings (incl. change-password) | Done | `Phase 7` + dashboard fixes `a92ea5d` |
 | 7e-g — Trends, Forecast, Costs | Done | ECharts visuals shipped in `627ecda`, chart-data fixes in `b0c0b17` |
 | 7h — MQTT page | Done | live SSE wiring shipped in `627ecda` |
-| 8 — Cutover (operator-driven) | **Mostly done** | data migrated `2026-04-26`, v1 LXC powered off; decommission tasks remaining (see §17 C3) |
+| 8 — Cutover (operator-driven) | Done | data migrated `2026-04-26`, v1 LXC powered off and left in place |
 | §18 live shakedown | Done | trends/forecast clip + ONS rebuild + chart fixes (`e74d762`, `bc64d8a`, `cbf665c`, `60e02dc`, `b0c0b17`) |
 
 Update this table after each phase's deploy + verification step.
@@ -787,12 +787,9 @@ agent + operator together on `2026-04-26`:
    HA continue to read from the shared `172.16.0.32` broker without
    configuration changes.
 
-**What still owes from §10 step 7** (operator-driven):
-- Snapshot tarball off-host for 30-day retention.
-- `userdel KeroTrack`, `rm -rf /opt/KeroTrack`, remove the systemd units
-  and cron files on the v1 LXC (or just leave the LXC powered off).
-- Confirm one full notifier cycle (1 week) runs cleanly on v2 before
-  destroying any v1 state.
+**Cutover is complete.** Operator's call: the powered-off v1 LXC stays
+as-is — no archive tarball, `userdel`, or unit cleanup is planned. v2
+owns kerosene tracking from this point.
 
 ### 16.2 Live MQTT ingest (Phase 3c made real) — `42f7018`
 
@@ -900,8 +897,8 @@ Frontend: **7 tests passing** (unchanged).
 
 ## 17. Backlog — DONE 2026-04-26
 
-The original backlog is fully delivered apart from operator-driven
-Phase-8 housekeeping (§C3). Five commits landed end-to-end:
+The original backlog is fully delivered. Five commits landed
+end-to-end:
 
 - A1 (`c75df92`) — analysis algorithm restoration
 - A2-A5 (`68afffe`) — refill_periods writer, per-pair cost, HDD metrics, weighted averages
@@ -1084,7 +1081,7 @@ flags it `"stale": true`. Cleanup migration:
 `DELETE FROM settings WHERE key = 'prices.homefuelsdirect_url'`.
 Harmless until then.
 
-### C. Deferred phase work — DONE except C3 (operator)
+### C. Deferred phase work — DONE
 
 #### C1. Frontend Phase 7e–7h ECharts visuals
 
@@ -1109,20 +1106,11 @@ Playwright is configured in `frontend/package.json` but never
 executed (no headless browser overnight). Worth wiring into the
 deploy ritual once C1 lands.
 
-#### C3. Phase 8 housekeeping (operator-driven)
+#### C3. Phase 8 housekeeping — closed
 
-Data already migrated 2026-04-26; v1 LXC is powered off.
-Remaining tasks:
-- 30-day archive tarball of `/opt/KeroTrack` off-host.
-- `userdel KeroTrack`, `rm -rf /opt/KeroTrack` on the v1 LXC.
-- Remove systemd units (`KeroTrack-MQTT.service`,
-  `KeroTrack-Web.service`) and cron files
-  (`/etc/cron.d/KeroTrack-Notifier`,
-  `/etc/cron.weekly/KeroTrack-Analysis`,
-  `/etc/cron.monthly/KeroTrack-CostAnalysis`).
-- Confirm one full notifier cycle (1 week) runs cleanly on v2 before
-  destroying any v1 state — keep systemd units installed during the
-  rollback window.
+Data migrated 2026-04-26; v1 LXC powered off. Operator's decision:
+no archive tarball, no `userdel`, no systemd/cron unit removal —
+the powered-off LXC stays as-is. Cutover considered complete.
 
 ---
 
@@ -1237,16 +1225,9 @@ spec landed in §17 C2 but aren't part of the unit count).
 ## 19. Outstanding work
 
 Everything in the original spec, the §17 backlog and the §18 live
-shakedown is done. The only items not closed out are operator-side or
-observation:
+shakedown is done. No code-side work remains. Two observation items
+worth a glance over the next couple of weeks:
 
-- **§17 C3 — Phase 8 housekeeping** (operator-driven, no agent action
-  available):
-  - 30-day archive tarball of `/opt/KeroTrack` off-host.
-  - `userdel KeroTrack` + `rm -rf /opt/KeroTrack` on the v1 LXC.
-  - Remove the v1 systemd units + cron files.
-  - Keep v1 systemd units installed for one full notifier cycle
-    (1 week) post-cutover as the rollback window.
 - **Sunday 2026-05-03 notifier** — the first scheduled v2 notifier
   run in production. Worth eyeballing the Gotify message to confirm
   the rich Markdown + refill-aware deltas land correctly off real data.
@@ -1257,7 +1238,7 @@ observation:
   that uses the post-fix BoilerJuice scrape data (~106p) for its
   cost calculation; values should come out reasonable without needing
   the rebuild routine.
-- **`legacy/kerotrack-pre-ons-20260426-105509.db`** snapshot retained
-  in a gitignored directory. Safe to keep until the next refill
-  cycle confirms cost analysis still produces sane numbers, then
-  delete.
+
+The `legacy/kerotrack-pre-ons-20260426-105509.db` snapshot is held in
+a gitignored directory. Safe to keep until the next refill cycle
+confirms cost analysis still produces sane numbers, then delete.
