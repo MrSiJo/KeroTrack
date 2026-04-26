@@ -45,3 +45,35 @@ async def test_seed_does_not_overwrite_operator_change(
         re_inserted = await seed_defaults(session)
     assert re_inserted == 0
     assert await svc.get("tank.capacity_l") == 9999.0
+
+
+async def test_seed_drops_retired_keys(sf: async_sessionmaker) -> None:
+    """B5: prices.homefuelsdirect_url (and any other RETIRED_KEYS) is
+    purged on the next seed run."""
+    from sqlalchemy import insert
+
+    from kerotrack.models.base import utc_now_iso
+    from kerotrack.settings.seeds import RETIRED_KEYS
+
+    # Pre-seed a retired key as if migrated from an older deployment.
+    async with sf() as session:
+        await session.execute(
+            insert(Setting).values(
+                key="prices.homefuelsdirect_url",
+                value='"https://homefuelsdirect.example/"',
+                value_type="string",
+                group_name="prices",
+                label="HomeFuelsDirect URL",
+                description=None,
+                is_secret=0,
+                updated_at=utc_now_iso(),
+            )
+        )
+        await session.commit()
+
+    async with sf() as session:
+        await seed_defaults(session)
+    async with sf() as session:
+        keys = set((await session.execute(select(Setting.key))).scalars().all())
+    for retired in RETIRED_KEYS:
+        assert retired not in keys

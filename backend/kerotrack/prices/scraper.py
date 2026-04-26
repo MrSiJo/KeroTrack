@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Awaitable, Callable
 
 import httpx
@@ -197,7 +197,7 @@ async def fetch_current_price(
     if ppl is not None:
         cache.save(
             {
-                "fetched_at": datetime.utcnow().isoformat(),
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
                 "ppl": ppl,
                 "source": source,
                 "boilerjuice": {"ppl": bj_ppl, "ok": bj_ppl is not None},

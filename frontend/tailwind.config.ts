@@ -1,6 +1,11 @@
 import forms from "@tailwindcss/forms";
 import type { Config } from "tailwindcss";
 
+// rgb(var(--token) / <alpha>) lets utility classes still take opacity
+// modifiers like `bg-bg-page/70`. The CSS variables are defined in
+// `src/app.css` and swap under :root.light vs the default dark palette.
+const surface = (varName: string) => `rgb(var(${varName}) / <alpha-value>)`;
+
 export default {
   content: ["./src/**/*.{html,svelte,ts,js}"],
   darkMode: "class",
@@ -8,19 +13,19 @@ export default {
     extend: {
       colors: {
         bg: {
-          page: "#0a0f1c",
-          panel: "#0f172a",
-          elev: "#1a2438",
+          page: surface("--bg-page"),
+          panel: surface("--bg-panel"),
+          elev: surface("--bg-elev"),
         },
         border: {
-          DEFAULT: "#1e293b",
-          strong: "#334155",
+          DEFAULT: surface("--border-default"),
+          strong: surface("--border-strong"),
         },
         text: {
-          DEFAULT: "#e2e8f0",
-          muted: "#94a3b8",
-          subtle: "#64748b",
-          label: "#475569",
+          DEFAULT: surface("--text-default"),
+          muted: surface("--text-muted"),
+          subtle: surface("--text-subtle"),
+          label: surface("--text-label"),
         },
         brand: {
           blue: "#3b82f6",

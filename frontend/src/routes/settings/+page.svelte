@@ -1,9 +1,28 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { stringToArray, getSchedule } from "cron-converter";
 
   import { api, ApiError } from "$lib/api";
   import { settings } from "$lib/stores/settings";
   import type { SettingDef, SettingItem } from "$lib/types/api";
+
+  function nextCronFires(expr: string, count = 3): string[] {
+    if (!expr || typeof expr !== "string") return [];
+    try {
+      const arr = stringToArray(expr.trim());
+      const sched = getSchedule(arr, new Date());
+      const fmt = new Intl.DateTimeFormat(undefined, {
+        weekday: "short",
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      return Array.from({ length: count }, () => fmt.format(sched.next().toDate()));
+    } catch {
+      return [];
+    }
+  }
 
   let pending = $state<Record<string, unknown>>({});
   let saving = $state(false);
@@ -108,7 +127,7 @@
   {#each Object.entries($settings.groups) as [group, items] (group)}
     <details
       class="rounded-lg border border-border bg-bg-panel"
-      open={group === "tank" || group === "mqtt"}
+      open={group === "tank" || group === "mqtt" || group === "schedule"}
     >
       <summary
         class="cursor-pointer border-b border-border px-4 py-2 text-sm font-medium uppercase tracking-wide text-text-muted"
@@ -155,6 +174,26 @@
                   on:input={(e) =>
                     setPending(item.key, (e.currentTarget as HTMLInputElement).value)}
                 />
+              {:else if item.value_type === "cron"}
+                {@const cronValue = (display(item) ?? "") as string}
+                {@const fires = nextCronFires(cronValue)}
+                <input
+                  type="text"
+                  class="w-full rounded border border-border bg-bg-elev px-2 py-1 font-mono text-xs"
+                  value={cronValue}
+                  on:input={(e) =>
+                    setPending(item.key, (e.currentTarget as HTMLInputElement).value)}
+                />
+                {#if fires.length > 0}
+                  <div class="mt-1 space-y-0.5 text-xs text-text-subtle">
+                    <div class="font-medium text-text-muted">Next 3 fires:</div>
+                    {#each fires as fire}
+                      <div>· {fire}</div>
+                    {/each}
+                  </div>
+                {:else if cronValue.trim()}
+                  <div class="mt-1 text-xs text-brand-red">Invalid cron expression</div>
+                {/if}
               {:else if item.value_type === "int" || item.value_type === "float"}
                 <input
                   type="number"

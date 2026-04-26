@@ -183,10 +183,10 @@ async def test_fetch_current_price_uses_stale_cache_on_total_failure(
 @respx.mock
 async def test_fresh_cache_short_circuits(tmp_path: Path) -> None:
     cache = PriceCache(tmp_path / "cache.json", ttl_seconds=86400)
-    from datetime import datetime
+    from datetime import datetime, timezone
     cache.save(
         {
-            "fetched_at": datetime.utcnow().isoformat(),
+            "fetched_at": datetime.now(timezone.utc).isoformat(),
             "ppl": 73.0,
             "source": "boilerjuice",
             "boilerjuice": {"ppl": 73.0, "ok": True},

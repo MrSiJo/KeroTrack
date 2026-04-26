@@ -2,6 +2,47 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Palette tokens — CSS custom properties resolved at runtime so Tailwind
+ * utilities (`bg-bg-page`, `text-text-muted`, `border-border-strong` …)
+ * pick the right value for the active theme. Dark stays the default per
+ * ADR-0004; `.light` on <html> swaps to the light palette.
+ *
+ * Brand accents are constant across themes — only surfaces, borders and
+ * text shift.
+ */
+:root {
+  --bg-page: 10 15 28;          /* #0a0f1c */
+  --bg-panel: 15 23 42;          /* #0f172a */
+  --bg-elev: 26 36 56;           /* #1a2438 */
+
+  --border-default: 30 41 59;    /* #1e293b */
+  --border-strong: 51 65 85;     /* #334155 */
+
+  --text-default: 226 232 240;   /* #e2e8f0 */
+  --text-muted: 148 163 184;     /* #94a3b8 */
+  --text-subtle: 100 116 139;    /* #64748b */
+  --text-label: 71 85 105;       /* #475569 */
+
+  color-scheme: dark;
+}
+
+:root.light {
+  --bg-page: 248 250 252;        /* slate-50 */
+  --bg-panel: 255 255 255;       /* white */
+  --bg-elev: 241 245 249;        /* slate-100 */
+
+  --border-default: 226 232 240; /* slate-200 */
+  --border-strong: 203 213 225;  /* slate-300 */
+
+  --text-default: 15 23 42;      /* slate-900 */
+  --text-muted: 71 85 105;       /* slate-600 */
+  --text-subtle: 100 116 139;    /* slate-500 */
+  --text-label: 148 163 184;     /* slate-400 */
+
+  color-scheme: light;
+}
+
 @layer base {
   html,
   body {

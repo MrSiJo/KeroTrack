@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from kerotrack.prices.cache import PriceCache
@@ -23,14 +23,14 @@ def test_save_then_load_round_trip(tmp_path: Path) -> None:
 
 def test_is_fresh_within_ttl(tmp_path: Path) -> None:
     cache = PriceCache(tmp_path / "c.json", ttl_seconds=60)
-    payload = {"fetched_at": datetime.utcnow().isoformat(), "ppl": 80.0}
+    payload = {"fetched_at": datetime.now(timezone.utc).isoformat(), "ppl": 80.0}
     assert cache.is_fresh(payload) is True
 
 
 def test_is_fresh_outside_ttl(tmp_path: Path) -> None:
     cache = PriceCache(tmp_path / "c.json", ttl_seconds=60)
     payload = {
-        "fetched_at": (datetime.utcnow() - timedelta(seconds=120)).isoformat(),
+        "fetched_at": (datetime.now(timezone.utc) - timedelta(seconds=120)).isoformat(),
         "ppl": 80.0,
     }
     assert cache.is_fresh(payload) is False

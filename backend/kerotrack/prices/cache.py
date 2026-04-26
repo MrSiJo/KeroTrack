@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -35,5 +35,9 @@ class PriceCache:
             fetched = datetime.fromisoformat(payload["fetched_at"])
         except ValueError:
             return False
-        age = (datetime.utcnow() - fetched).total_seconds()
+        # Tolerate both legacy naive timestamps (older cache files) and the
+        # tz-aware ones we now write — normalise both to UTC for the diff.
+        if fetched.tzinfo is None:
+            fetched = fetched.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - fetched).total_seconds()
         return age < self.ttl_seconds
