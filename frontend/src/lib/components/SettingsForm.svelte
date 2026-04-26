@@ -89,6 +89,31 @@
     );
   });
 
+  let resettingGroup = $state(false);
+
+  async function resetGroup() {
+    const items = $settings.groups[$activeGroup] ?? [];
+    if (!items.length) return;
+    if (
+      !confirm(
+        `Reset all ${items.length} ${$activeGroup} settings to their default values? This is immediate; pending unsaved changes will be discarded.`,
+      )
+    ) {
+      return;
+    }
+    resettingGroup = true;
+    try {
+      for (const item of items) {
+        await api.resetSetting(item.key);
+      }
+      await settings.refresh();
+    } catch (err) {
+      console.error("reset failed", err);
+    } finally {
+      resettingGroup = false;
+    }
+  }
+
   async function changePassword(e: Event) {
     e.preventDefault();
     pwError = null;
@@ -128,6 +153,16 @@
           : `${visibleItems().length} setting${visibleItems().length === 1 ? "" : "s"}`}
       </div>
     </div>
+    {#if !$search.trim() && $activeGroup !== "account" && $activeGroup !== "maintenance"}
+      <button
+        type="button"
+        class="rounded border border-border px-2 py-1 text-[11px] text-text-muted hover:border-border-strong hover:text-text disabled:opacity-50"
+        onclick={resetGroup}
+        disabled={resettingGroup}
+      >
+        {resettingGroup ? "Resetting…" : `Reset ${$activeGroup}`}
+      </button>
+    {/if}
   </header>
 
   {#if $activeGroup === "account" && !$search.trim()}
@@ -176,10 +211,15 @@
         {@const def = defFor(item.key)}
         <div class="group grid grid-cols-12 items-center gap-3 px-4 py-2.5">
           <label class="col-span-5 text-sm text-text">
-            <span title={def?.description ?? ""}>
+            <span class="inline-flex items-center gap-1">
               {def?.label ?? item.label}
               {#if def?.description}
-                <span class="ml-1 cursor-help text-text-subtle" aria-label="info">ⓘ</span>
+                <span class="info group relative inline-block cursor-help text-text-subtle" tabindex="0" aria-label={def.description}>
+                  ⓘ
+                  <span class="pointer-events-none invisible absolute left-1/2 top-full z-10 mt-1 w-64 -translate-x-1/2 rounded border border-border bg-bg-elev px-2 py-1 text-[11px] text-text shadow-lg group-hover:visible group-focus:visible">
+                    {def.description}
+                  </span>
+                </span>
               {/if}
             </span>
             <div class="font-mono text-[10px] text-text-subtle opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">{item.key}</div>
