@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from "svelte";
 
+  import HeroMqtt from "$lib/components/HeroMqtt.svelte";
   import { api } from "$lib/api";
   import MqttFeed from "$lib/components/MqttFeed.svelte";
 
@@ -131,6 +132,8 @@
       <span>{dotLabel}</span>
     </div>
   </header>
+
+  <HeroMqtt size="full" />
 
   <p class="text-xs text-text-muted">
     Live MQTT messages observed by ingest, streamed over SSE. Latest message at the top;
