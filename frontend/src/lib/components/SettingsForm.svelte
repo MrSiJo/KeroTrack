@@ -44,6 +44,30 @@
     }
   }
 
+  const GROUP_ORDER: Record<string, string[]> = {
+    mqtt: [
+      "mqtt.broker",
+      "mqtt.port",
+      "mqtt.username",
+      "mqtt.password",
+      "mqtt.topic_readings",
+      "mqtt.topic_analytics",
+      "mqtt.topic_costanalysis",
+      "mqtt.broadcast_interval_minutes",
+      "mqtt.timeout_minutes",
+    ],
+  };
+
+  function applyOrder(items: SettingItem[], group: string): SettingItem[] {
+    const order = GROUP_ORDER[group];
+    if (!order) return items;
+    const idx = (k: string) => {
+      const i = order.indexOf(k);
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i;
+    };
+    return [...items].sort((a, b) => idx(a.key) - idx(b.key));
+  }
+
   let visibleItems = $derived(() => {
     const q = $search.trim().toLowerCase();
     if (q) {
@@ -54,7 +78,8 @@
       );
     }
     if ($activeGroup === "account") return [];
-    return $settings.groups[$activeGroup] ?? [];
+    if ($activeGroup === "maintenance") return [];
+    return applyOrder($settings.groups[$activeGroup] ?? [], $activeGroup);
   });
 
   async function changePassword(e: Event) {
