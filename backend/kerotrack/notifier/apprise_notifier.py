@@ -420,7 +420,9 @@ async def run(
     apprise_factory: Callable[[list[str]], Any] | None = None,
 ) -> NotifierResult:
     """Run the notifier predicate and dispatch a rich Markdown summary."""
-    now = now or datetime.now()
+    if now is None:
+        from kerotrack.clock import local_now
+        now = local_now().replace(tzinfo=None)
     weekly_enabled = bool(await settings_service.get("notifications.weekly_enabled"))
     monthly_enabled = bool(await settings_service.get("notifications.monthly_enabled"))
 

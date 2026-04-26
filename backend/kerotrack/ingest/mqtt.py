@@ -69,11 +69,14 @@ async def _load_previous(
 
 def _normalise_payload(raw: dict[str, Any]) -> dict[str, Any]:
     """Massage the RTL_433 payload into the shape `recalc.process` expects."""
+    from kerotrack.clock import local_now_str
+
     payload = dict(raw)
     if payload.get("model") == "Oil-SonicAdv":
         payload["model"] = "Oil-SonicSmart"
     if "time" not in payload:
-        payload["time"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+        # Local time matches v1 — DST handled via bootstrap.tz.
+        payload["time"] = local_now_str()
     return payload
 
 

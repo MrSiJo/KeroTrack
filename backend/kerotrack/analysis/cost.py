@@ -21,6 +21,7 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from kerotrack.clock import local_now, local_now_str, parse_local
 from kerotrack.models.cost_analysis import CostAnalysis
 from kerotrack.models.refill import ActualRefillCost
 from kerotrack.models.refill_period import RefillPeriod
@@ -57,18 +58,16 @@ async def compute(
 
     latest = periods[0]
     days_since_refill = 0
-    try:
-        end_dt = datetime.strptime(latest.end_date, "%Y-%m-%d %H:%M:%S")
-        days_since_refill = max((datetime.utcnow() - end_dt).days, 0)
-    except (ValueError, TypeError):
-        days_since_refill = 0
+    end_dt = parse_local(latest.end_date)
+    if end_dt is not None:
+        days_since_refill = max((local_now() - end_dt).days, 0)
 
     period_costs = [p.total_cost or 0.0 for p in periods]
     period_consumptions = [p.total_consumption or 0.0 for p in periods]
     daily_costs = [p.daily_cost or 0.0 for p in periods]
 
     payload = {
-        "analysis_date": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "analysis_date": local_now_str(),
         "latest_period_start": latest.start_date,
         "latest_period_end": latest.end_date,
         "latest_period_days": latest.days or 0,

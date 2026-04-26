@@ -2,34 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from fastapi import APIRouter, Request
 from sqlalchemy import desc, select, text
 
+from kerotrack.clock import local_now, parse_local
 from kerotrack.models.reading import Reading
 
 router = APIRouter(tags=["health"])
-
-
-def _parse_iso(value: str | None) -> datetime | None:
-    if not value:
-        return None
-    candidates = (
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S.%f",
-    )
-    for fmt in candidates:
-        try:
-            return datetime.strptime(value, fmt).replace(tzinfo=UTC)
-        except ValueError:
-            continue
-    try:
-        return datetime.fromisoformat(value).astimezone(UTC)
-    except ValueError:
-        return None
 
 
 @router.get("/api/health")
@@ -62,9 +41,9 @@ async def health(request: Request) -> dict[str, object]:
         payload["db"] = "ok"
         if row is not None:
             payload["last_reading_at"] = row
-            ts = _parse_iso(row)
+            ts = parse_local(row)
             if ts is not None:
-                age = (datetime.now(UTC) - ts).total_seconds()
+                age = (local_now() - ts).total_seconds()
                 payload["age_seconds"] = max(int(age), 0)
     except Exception:
         payload["db"] = "down"

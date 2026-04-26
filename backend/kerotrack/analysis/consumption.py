@@ -22,6 +22,7 @@ from typing import Any
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from kerotrack.clock import local_now, local_now_str, parse_local
 from kerotrack.models.analysis_result import AnalysisResult
 from kerotrack.models.hdd import HddDatum
 from kerotrack.models.reading import Reading
@@ -106,8 +107,10 @@ async def compute(
         window = readings
 
     first = window[0]
-    first_dt = _parse_dt(first.date) or datetime.utcnow()
-    latest_dt = _parse_dt(latest.date) or datetime.utcnow()
+    # All reading.date strings are naive local time — attach the configured
+    # zone so subtractions across DST boundaries stay correct.
+    first_dt = parse_local(first.date) or local_now()
+    latest_dt = parse_local(latest.date) or local_now()
     days = max((latest_dt - first_dt).total_seconds() / 86400.0, 0.0)
     total_consumption = max(
         (first.litres_remaining or 0) - (latest.litres_remaining or 0),
@@ -150,14 +153,14 @@ async def compute(
         empty_date = None
 
     days_since_refill = (
-        (latest_dt - (_parse_dt(window[0].date) or latest_dt)).days
+        (latest_dt - (parse_local(window[0].date) or latest_dt)).days
         if refill_idx is not None
         else None
     )
 
     payload: dict[str, Any] = {
         "latest_reading_date": latest.date,
-        "latest_analysis_date": datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "latest_analysis_date": local_now_str(),
         "latest_reading_refill_detected": latest.refill_detected,
         "latest_reading_leak_detected": latest.leak_detected,
         "days_since_refill": days_since_refill,
