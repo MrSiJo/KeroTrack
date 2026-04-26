@@ -20,8 +20,14 @@
   let pct = $derived(reading?.percentage_remaining ?? 0);
   let bars = $derived(reading?.bars_remaining ?? null);
   let daysRemaining = $derived(analysis?.estimated_days_remaining ?? null);
-  let costToFill = $derived(reading?.cost_to_fill ?? null);
-  let currentPpl = $derived(reading?.current_ppl ?? null);
+  let costToFill = $derived(
+    reading?.cost_to_fill != null && reading.cost_to_fill !== ""
+      ? Number(reading.cost_to_fill)
+      : null,
+  );
+  let currentPpl = $derived(
+    reading?.current_ppl != null ? Number(reading.current_ppl) : null,
+  );
 
   let levelTone = $derived<"default" | "amber" | "red">(
     pct <= lowThreshold * 0.5
@@ -58,7 +64,7 @@
   </div>
 
   <div class="mt-3 flex items-start gap-4">
-    <div class="flex-shrink-0">
+    <div class="w-72 flex-shrink-0">
       <TankSilhouette
         percentage={pct}
         litres={reading?.litres_remaining ?? null}
