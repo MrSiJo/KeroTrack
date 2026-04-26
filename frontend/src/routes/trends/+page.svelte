@@ -3,6 +3,7 @@
 
   import BarChart from "$lib/components/BarChart.svelte";
   import CalendarHeatmap from "$lib/components/CalendarHeatmap.svelte";
+  import HeroTrends from "$lib/components/HeroTrends.svelte";
   import LineChart from "$lib/components/LineChart.svelte";
   import ScatterChart from "$lib/components/ScatterChart.svelte";
   import { api } from "$lib/api";
@@ -180,6 +181,8 @@
 </script>
 
 <div class="space-y-6">
+  <HeroTrends size="full" />
+
   <header class="flex flex-wrap items-center justify-between gap-3">
     <div>
       <h1 class="text-lg font-semibold">Trends</h1>
