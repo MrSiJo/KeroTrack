@@ -9,8 +9,11 @@
   import Sidebar from "$lib/components/Sidebar.svelte";
   import ThemeToggle from "$lib/components/ThemeToggle.svelte";
   import { registerKeroTrackTheme } from "$lib/charts/theme";
+  import { get } from "svelte/store";
+
   import { auth } from "$lib/stores/auth";
   import { liveStatus } from "$lib/stores/liveStatus";
+  import { settings } from "$lib/stores/settings";
 
   let { children } = $props();
 
@@ -33,6 +36,22 @@
     // Authenticated — boot live status + SSE.
     void liveStatus.refresh();
     liveStatus.start();
+
+    // Onboarding gate — redirect once if user hasn't configured the basics.
+    if (path === "/onboarding") return;
+    if (typeof localStorage !== "undefined" && localStorage.getItem("kerotrack.onboarding.dismissed") === "1") return;
+    void settings.refresh().then(() => {
+      const snapshot = get(settings);
+      const items = snapshot.items;
+      if (!items.length) return;
+      const broker = items.find((i) => i.key === "mqtt.broker")?.value;
+      const username = items.find((i) => i.key === "mqtt.username")?.value;
+      const apprise = items.find((i) => i.key === "notifications.apprise_urls")?.value;
+      const appriseEmpty = !Array.isArray(apprise) || apprise.length === 0;
+      if (broker === "localhost" && (!username || username === "") && appriseEmpty) {
+        void goto("/onboarding");
+      }
+    });
   });
 </script>
 
