@@ -15,7 +15,7 @@ The design language is locked to the following rules. They're load-bearing — c
 
 ### Palette
 
-Inherits from JobTrack's slate/blue, refined for sensor data:
+Slate/blue base, refined for sensor data:
 
 | Role | Token | Value |
 |---|---|---|
@@ -48,6 +48,19 @@ Amber, red, emerald, and teal are reserved for state. Never decorative. Specific
 - **Emerald** — good news. Refill detected, scheduler caught up, healthy connection.
 - **Teal** — temperature lane. Used on dual-axis charts and the temperature stat. Never used elsewhere.
 - **Violet** — secondary chart series only (e.g. HomeFuelsDirect price line as the fallback source).
+
+### Page accents (amendment 2026-04-26)
+
+The page-hero gallery on the Dashboard and the per-page hero envelope use a 3 px left-edge accent in the page's signature colour. These uses extend — but do not contradict — the semantic colour rule:
+
+- **Trends → teal** — Trends owns the temperature lane, which already justifies teal on the page.
+- **Forecast → violet** — violet was already designated for secondary chart series; the forecast fan envelope is exactly that.
+- **Costs → amber** — already used as the table accent for emphasis in cost tables.
+- **Records → slate (`--border-strong`)** — neutral; Records has no semantic colour.
+- **MQTT → emerald** — connection health uses emerald already.
+- **Dashboard tank panel → blue** — primary lane.
+
+Decorative use of these colours on charts or stat cards remains forbidden; only the 3 px accent strip and the page-label text use the page colour.
 
 ### Typography
 
@@ -120,7 +133,7 @@ Cross-page links exist (clicking "estimated empty date" on Dashboard deep-links 
 
 ### Keyboard
 
-Vim-style chord navigation, JobTrack-aligned: `g d / g t / g f / g c / g r / g m / g s` jump to Dashboard / Trends / Forecast / Costs / Records / MQTT / Settings. `?` opens a shortcut sheet.
+Vim-style chord navigation: `g d / g t / g f / g c / g r / g m / g s` jump to Dashboard / Trends / Forecast / Costs / Records / MQTT / Settings. `?` opens a shortcut sheet.
 
 ### Component inventory
 
@@ -128,22 +141,25 @@ The frontend exposes exactly these components — additions go through PR review
 
 | Component | Used by |
 |---|---|
-| `TankSilhouette.svelte` | Dashboard |
-| `StatusPills.svelte` | Dashboard |
-| `StatCard.svelte` | Dashboard, Forecast, Costs |
-| `Sparkline.svelte` | Dashboard, Forecast |
+| `TankSilhouette.svelte` | Dashboard (inside TankHeroPanel) |
+| `TankHeroPanel.svelte` | Dashboard |
+| `HeroShell.svelte` | All five page heroes |
+| `HeroTrends.svelte` | Dashboard, Trends |
+| `HeroForecast.svelte` | Dashboard, Forecast |
+| `HeroCosts.svelte` | Dashboard, Costs |
+| `HeroRecords.svelte` | Dashboard, Records |
+| `HeroMqtt.svelte` | Dashboard, MQTT |
+| `StatCard.svelte` | (deprecated; retained for migration only) |
 | `LineChart.svelte` (dual-axis capable) | Trends, Costs |
 | `BarChart.svelte` | Trends, Costs |
 | `ScatterChart.svelte` | Trends |
 | `CalendarHeatmap.svelte` | Trends |
-| `ForecastFan.svelte` | Forecast |
-| `DataTable.svelte` (sortable, filterable, paginated) | Records, Costs |
+| `ForecastFan.svelte` | Forecast (full-page) |
 | `MqttFeed.svelte` | MQTT |
-| `SettingsForm.svelte` + `SettingField.svelte` | Settings |
+| `SettingsNav.svelte` + `SettingsForm.svelte` | Settings |
+| `RunPanel.svelte` | Settings → Maintenance |
 | `ThemeToggle.svelte` | layout |
 | `Sidebar.svelte` + `KeyboardHints.svelte` | layout |
-
-Eleven content + three chrome.
 
 ## Consequences
 
