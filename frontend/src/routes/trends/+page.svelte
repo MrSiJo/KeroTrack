@@ -60,9 +60,13 @@
     yearLoading = true;
     try {
       const since = `${isoDaysAgo(365)} 00:00:00`;
+      // Fetch most-recent-first so a capped limit always returns the
+      // tail of the year rather than the beginning. The heatmap and
+      // other year-wide series tolerate any input order; they bucket
+      // by date.
       const resp = await api.readings({
         since,
-        order: "asc",
+        order: "desc",
         limit: 10000,
       });
       yearReadings = resp.items ?? [];
