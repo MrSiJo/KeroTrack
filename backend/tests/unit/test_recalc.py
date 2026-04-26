@@ -15,10 +15,44 @@ from kerotrack.ingest.recalc import (
     calculate_compensated_volume,
     calculate_hdd,
     calculate_seasonal_efficiency,
+    decode_status,
     detect_leak,
     detect_refill,
     process,
 )
+
+
+def test_decode_status_known_codes() -> None:
+    assert "Initial sync" in decode_status(192)
+    assert "Post-sync" in decode_status(128)
+    assert "Transitional" in decode_status(144)
+    assert "Normal" in decode_status(152)
+
+
+def test_decode_status_unknown_codes() -> None:
+    assert decode_status(255).startswith("Unknown status")
+    assert decode_status(None).startswith("Unknown status")
+    assert decode_status("garbage").startswith("Unknown status")
+
+
+def test_process_logs_non_normal_status(caplog) -> None:
+    fixture = dict(FIXTURES["canonical"])
+    fixture["status"] = 192  # Initial sync
+    ctx = _ctx()
+    with caplog.at_level("INFO", logger="kerotrack.ingest.recalc"):
+        process(fixture, ctx)
+    assert any("Initial sync" in record.message for record in caplog.records)
+
+
+def test_process_silent_on_normal_status(caplog) -> None:
+    fixture = dict(FIXTURES["canonical"])
+    fixture["status"] = 152  # Normal
+    ctx = _ctx()
+    with caplog.at_level("INFO", logger="kerotrack.ingest.recalc"):
+        process(fixture, ctx)
+    assert not any(
+        "Sensor status" in record.message for record in caplog.records
+    )
 
 
 FIXTURES = json.loads(

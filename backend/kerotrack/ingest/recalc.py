@@ -12,9 +12,32 @@ parser must keep working byte-for-byte.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+# Watchman Sonic Advanced status byte (raw_flags). v1 stored the byte
+# untouched but logged the decoded state — we do the same so non-Normal
+# states show up in container logs without changing the wire format.
+_STATUS_DECODE: dict[int, str] = {
+    192: "Initial sync (20min fast reporting)",  # 0xC0
+    128: "Post-sync calibration",  # 0x80
+    144: "Transitional state",  # 0x90
+    152: "Normal operation",  # 0x98
+}
+
+
+def decode_status(status: Any) -> str:
+    """Return a human-readable label for a Watchman Sonic status byte."""
+    try:
+        key = int(status)
+    except (TypeError, ValueError):
+        return f"Unknown status: {status}"
+    return _STATUS_DECODE.get(key, f"Unknown status: {key}")
 
 
 @dataclass(frozen=True, slots=True)
@@ -144,6 +167,16 @@ def process(
     current_date = datetime.strptime(reading["time"], "%Y-%m-%d %H:%M:%S")
     current_air_gap = float(reading["depth_cm"])
     current_temp = float(reading["temperature_C"])
+
+    if "status" in reading and reading["status"] is not None:
+        try:
+            status_byte = int(reading["status"])
+        except (TypeError, ValueError):
+            status_byte = None
+        if status_byte is not None and status_byte != 152:
+            logger.info(
+                "Sensor status: %s (%s)", decode_status(status_byte), status_byte
+            )
 
     current_litres = calculate_compensated_volume(
         current_air_gap,

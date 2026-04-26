@@ -9,10 +9,13 @@ import os
 import sys
 from pathlib import Path
 
+from sqlalchemy import delete, desc, select
+
 from kerotrack.bootstrap import get_bootstrap, reset_bootstrap_cache
 from kerotrack.db import init_engine, session_factory
 from kerotrack.db_migrate import ensure_schema
 from kerotrack.migration.v1_to_v2 import migrate
+from kerotrack.models.refill import ActualRefillCost
 from kerotrack.settings.seeds import seed_defaults
 from kerotrack.settings.service import SettingsService
 
@@ -126,6 +129,196 @@ async def _run_job(args: argparse.Namespace) -> int:
     return 0
 
 
+async def _with_session(callback):
+    boot = get_bootstrap()
+    engine = init_engine(boot.database_url)
+    await ensure_schema(engine)
+    sf = session_factory(engine)
+    async with sf() as session:
+        await seed_defaults(session)
+    try:
+        return await callback(sf)
+    finally:
+        await engine.dispose()
+
+
+def _refill_to_dict(row: ActualRefillCost) -> dict:
+    return {c: getattr(row, c) for c in row.__table__.columns.keys()}
+
+
+async def _refill_add(args: argparse.Namespace) -> int:
+    async def _do(sf):
+        async with sf() as session:
+            existing = (
+                await session.execute(
+                    select(ActualRefillCost).where(
+                        ActualRefillCost.refill_date == args.refill_date
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing is not None and not args.force:
+                print(
+                    f"refill at {args.refill_date} already exists — use --force to overwrite",
+                    file=sys.stderr,
+                )
+                return 2
+            payload = {
+                "refill_date": args.refill_date,
+                "actual_volume_litres": args.volume,
+                "actual_ppl": args.ppl,
+                "total_cost": args.total_cost,
+                "invoice_ref": args.invoice,
+                "notes": args.notes,
+                "order_date": args.order_date,
+                "order_ref": args.order_ref,
+            }
+            if existing is not None:
+                for k, v in payload.items():
+                    setattr(existing, k, v)
+            else:
+                session.add(ActualRefillCost(**payload))
+            await session.commit()
+        print(json.dumps(payload, default=str))
+        return 0
+
+    return await _with_session(_do)
+
+
+async def _refill_list(_: argparse.Namespace) -> int:
+    async def _do(sf):
+        async with sf() as session:
+            rows = (
+                (
+                    await session.execute(
+                        select(ActualRefillCost).order_by(
+                            desc(ActualRefillCost.refill_date)
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+        items = [_refill_to_dict(r) for r in rows]
+        print(json.dumps({"items": items, "count": len(items)}, indent=2, default=str))
+        return 0
+
+    return await _with_session(_do)
+
+
+async def _refill_delete(args: argparse.Namespace) -> int:
+    async def _do(sf):
+        async with sf() as session:
+            result = await session.execute(
+                delete(ActualRefillCost).where(
+                    ActualRefillCost.refill_date == args.refill_date
+                )
+            )
+            await session.commit()
+        if result.rowcount == 0:
+            print(f"no refill at {args.refill_date}", file=sys.stderr)
+            return 1
+        print(f"deleted refill at {args.refill_date}")
+        return 0
+
+    return await _with_session(_do)
+
+
+async def _refill_clear(args: argparse.Namespace) -> int:
+    if not args.yes:
+        print("refusing to clear without --yes", file=sys.stderr)
+        return 2
+
+    async def _do(sf):
+        async with sf() as session:
+            result = await session.execute(delete(ActualRefillCost))
+            await session.commit()
+        print(f"cleared {result.rowcount} actual_refill_costs row(s)")
+        return 0
+
+    return await _with_session(_do)
+
+
+def _parse_historical_deliveries(path: Path) -> list[dict]:
+    """Parse the v1 ``historical_deliveries.txt`` format.
+
+    Lines are ``Product - Quantity - Service - DeliveryBy - ppl - OrderTotal``
+    with a one-line header. Date format is ``DD/MM/YYYY``.
+    """
+    if not path.exists():
+        return []
+    deliveries: list[dict] = []
+    lines = path.read_text().splitlines()
+    if not lines:
+        return []
+    # Skip header (matches v1 behaviour).
+    for raw in lines[1:]:
+        line = raw.strip()
+        if not line:
+            continue
+        parts = [p.strip() for p in line.split(" - ")]
+        if len(parts) < 6:
+            continue
+        try:
+            quantity = float(parts[1])
+            ppl = float(parts[4])
+            total_cost = float(parts[5])
+            day, month, year = parts[3].split("/")
+            delivery_date = f"{year}-{month}-{day} 12:00:00"
+        except (ValueError, IndexError):
+            continue
+        deliveries.append(
+            {
+                "refill_date": delivery_date,
+                "actual_volume_litres": quantity,
+                "actual_ppl": ppl,
+                "total_cost": total_cost,
+                "invoice_ref": parts[0],
+                "notes": parts[2],
+            }
+        )
+    return deliveries
+
+
+async def _refill_import_historical(args: argparse.Namespace) -> int:
+    src = Path(args.path)
+    deliveries = _parse_historical_deliveries(src)
+    if not deliveries:
+        print(f"no deliveries parsed from {src}", file=sys.stderr)
+        return 1
+
+    async def _do(sf):
+        added = 0
+        skipped = 0
+        async with sf() as session:
+            for d in deliveries:
+                existing = (
+                    await session.execute(
+                        select(ActualRefillCost).where(
+                            ActualRefillCost.refill_date == d["refill_date"]
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing is not None and not args.force:
+                    skipped += 1
+                    continue
+                if existing is not None:
+                    for k, v in d.items():
+                        setattr(existing, k, v)
+                else:
+                    session.add(ActualRefillCost(**d))
+                added += 1
+            await session.commit()
+        print(
+            json.dumps(
+                {"added_or_updated": added, "skipped": skipped, "total": len(deliveries)},
+                indent=2,
+            )
+        )
+        return 0
+
+    return await _with_session(_do)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="kerotrack")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -150,6 +343,58 @@ def _build_parser() -> argparse.ArgumentParser:
     runj.add_argument("name", choices=["analysis", "cost-analysis", "notifier"])
     runj.add_argument("--test", action="store_true")
     runj.set_defaults(func=_run_job)
+
+    # ----- refill management (A7) -----------------------------------------
+    add_refill = sub.add_parser(
+        "add-refill", help="Insert a manual actual_refill_costs row"
+    )
+    add_refill.add_argument(
+        "--refill-date", required=True, help="YYYY-MM-DD HH:MM:SS"
+    )
+    add_refill.add_argument("--volume", type=float, help="Litres delivered")
+    add_refill.add_argument("--ppl", type=float, help="Pence per litre")
+    add_refill.add_argument("--total-cost", type=float, help="Invoice total in pounds")
+    add_refill.add_argument("--invoice", help="Invoice reference")
+    add_refill.add_argument("--notes")
+    add_refill.add_argument("--order-date")
+    add_refill.add_argument("--order-ref")
+    add_refill.add_argument(
+        "--force", action="store_true", help="Overwrite an existing entry"
+    )
+    add_refill.set_defaults(func=_refill_add)
+
+    list_refills = sub.add_parser(
+        "list-refills", help="List manual actual_refill_costs rows as JSON"
+    )
+    list_refills.set_defaults(func=_refill_list)
+
+    del_refill = sub.add_parser(
+        "delete-refill", help="Delete a single actual_refill_costs row"
+    )
+    del_refill.add_argument(
+        "--refill-date", required=True, help="YYYY-MM-DD HH:MM:SS"
+    )
+    del_refill.set_defaults(func=_refill_delete)
+
+    clear_refills = sub.add_parser(
+        "clear-refills", help="Delete every actual_refill_costs row (--yes required)"
+    )
+    clear_refills.add_argument("--yes", action="store_true", help="Confirm deletion")
+    clear_refills.set_defaults(func=_refill_clear)
+
+    import_hist = sub.add_parser(
+        "import-historical",
+        help="Bulk-import deliveries from a historical_deliveries.txt file",
+    )
+    import_hist.add_argument(
+        "--path",
+        required=True,
+        help="Path to historical_deliveries.txt (v1 format)",
+    )
+    import_hist.add_argument(
+        "--force", action="store_true", help="Overwrite existing rows"
+    )
+    import_hist.set_defaults(func=_refill_import_historical)
 
     return parser
 
