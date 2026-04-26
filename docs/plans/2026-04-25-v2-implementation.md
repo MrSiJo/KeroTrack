@@ -931,6 +931,14 @@ haven't been implemented. Still to land:
 
 ### 17.3 Smaller follow-ups
 
+- **Theme toggle is a no-op visually** — the `theme` store flips state and
+  the `<html>` `dark`/`light` class toggles correctly, but Tailwind's
+  `darkMode: "class"` is configured against tokens that already render the
+  dark palette regardless of the class (the colour tokens in
+  `tailwind.config.ts` are hard-coded to the dark values). Light mode needs
+  CSS custom properties that resolve differently under `:root.light`, OR
+  Tailwind palette overrides scoped to the `.light` class. Dark must remain
+  the default per ADR-0004.
 - **Playwright e2e tests** were written into `frontend/package.json` but
   never executed (no headless browser was available during the autonomous
   run). Worth wiring into the deploy ritual once the Phase 17.1 pages
