@@ -225,7 +225,20 @@
             <div class="font-mono text-[10px] text-text-subtle opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">{item.key}</div>
           </label>
           <div class="col-span-7">
-            {#if item.key === "web.theme_default"}
+            {#if item.key === "notifications.apprise_urls"}
+              {@const lines = Array.isArray(display(item)) ? (display(item) as string[]).join("\n") : ""}
+              <textarea
+                class="w-full rounded border border-border bg-bg-elev px-2 py-1 font-mono text-xs"
+                rows="3"
+                placeholder="One URL per line — e.g. gotify://192.168.1.10/AbC123"
+                oninput={(e) => {
+                  const raw = (e.currentTarget as HTMLTextAreaElement).value;
+                  const arr = raw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+                  onChange(item.key, arr);
+                }}
+                >{lines}</textarea
+              >
+            {:else if item.key === "web.theme_default"}
               <select
                 class="w-32 rounded border border-border bg-bg-elev px-2 py-1 text-xs"
                 value={display(item) as string}
