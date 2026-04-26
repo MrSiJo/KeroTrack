@@ -897,67 +897,223 @@ Frontend: **7 tests passing** (unchanged).
 
 ---
 
-## 17. What's still left
+## 17. Backlog (priority order)
 
-### 17.1 Frontend visuals (deferred from Phase 7)
+The list is ranked: **(A)** backend-logic correctness comes first because
+those bugs silently produce wrong numbers in MQTT, the dashboard, and
+the Sunday Gotify summary. **(B)** cosmetic / UX items come next.
+**(C)** deferred-phase work (frontend ECharts, Phase 8 decommission)
+comes last. None of the items below change the on-the-wire MQTT
+contract — output shapes stay locked.
 
-The Trends, Forecast, and Costs pages are *data-driven stubs* — they
-fetch and show real API data but the rich ECharts visuals from ADR-0004
-haven't been implemented. Still to land:
+### A. Backend logic — highest priority
 
+#### A1. Analysis: hot-water baseline + heating clamps + bounded look-back
+
+The Phase 4 port took shortcuts that work fine on migrated historical
+data but produce misleading averages once v2 starts running its own
+analysis on live readings. v1 (587 lines) had:
+
+- A **hot-water baseline** `daily_hw_l ≈ 1.5–2 L/day` derived from
+  `boiler.fuel_rate_l_per_h` × scheduled HW sessions/week ÷ 7. Used as a
+  **floor** on per-day consumption when HDD=0. v2 has no floor — summer
+  days with ~0.3 L/day are taken at face value, deflating
+  `avg_daily_consumption_l` and ballooning `estimated_days_remaining`.
+- A **bounded look-back window**: `lookback_days = min(60, max(30, days_since_refill))`.
+  v2 averages over the full ~365-day post-refill window so summer's
+  near-zero usage poisons the heating-season baseline.
+- **Heating estimate blending**: `(heating_7d × 0.65) + (heating_long × 0.35)`,
+  scaled by today_HDD/avg_7day_HDD (clamped 0.6–1.6), final result
+  clamped to 0.5–15 L/day. v2 just does `avg_daily × seasonal_factor`
+  with no clamps — mid-summer gets implausible heating numbers.
+- A **monthly seasonal heating factor** table derived from real Nest
+  hours data (78 in Jan, 21 in April, 0 in Jun/Jul/Aug). v2 buckets
+  months into three coarse seasons (1.0/0.7/0.3); April resolves to
+  0.7 when the empirical factor is 0.27 — overstates April heating ~3×.
+- An **`estimated_days_remaining` cap** of 400 days when HDD>0, 700
+  otherwise. v2 has no cap and can produce multi-thousand-day
+  projections in summer.
+- **Per-pair refill-aware walker** (`if used < -refill_threshold:
+  continue; if used <= 0: continue`) for `total_consumption`. v2 uses a
+  single first-vs-latest delta which is wrong if there's any sensor
+  jitter or undetected spike inside the window.
+
+**Recommendation**: restore the v1 algorithm. Same output keys, better
+values. Estimate: ~150 lines added to `analysis/consumption.py`, plus
+the per-pair walker helper. Tests need: HW-baseline floor on warm
+days; clamps trigger above 15 L/day; bounded look-back during long
+post-refill windows.
+
+#### A2. Cost: refill_periods is never written by v2 (silent breakage)
+
+`analysis/cost.compute()` only **reads** from `refill_periods`. The
+v1 implementation's `analyze_costs_between_refills()` (in
+`oil_cost_analysis.py`) detected refill events from
+`actual_refill_costs` (preferred when present) or sensor-detected
+refills (fallback), paired consecutive refills, walked the readings
+between, and **wrote** a row per period back into `refill_periods`. v2
+has none of that.
+
+**Concrete consequence**: the 9 period rows that came across in the
+Phase 8 migration are all that will ever exist. The next time the
+sensor detects a refill, or the operator POSTs an actual refill cost
+via `/api/refills`, no period row is generated. The Costs page and
+the cost-analysis MQTT publish freeze on that 9-row dataset
+indefinitely.
+
+**Recommendation**: implement `_detect_periods()` and call it from
+`run_cost_analysis` before `compute()`. Should:
+- Find refill markers in `readings` (date, litres_remaining at refill)
+- Pair consecutive refills into periods
+- Walk readings inside each period for reading-based cost
+  (`Σ consumption_pair × ppl_at_pair / 100`) — preferred over
+  `total × average_ppl`
+- Prefer `actual_refill_costs` invoiced amounts when matched to a
+  refill date (within 24h tolerance, per v1)
+- Upsert each period into `refill_periods`
+
+Estimate: ~200 lines in `analysis/cost.py`. Output payload unchanged.
+
+#### A3. Cost: per-period reading-based cost + actual-cost preference
+
+Even before period generation lands, the existing rows would benefit
+from the v1 cost-walker:
+- v1's `calculate_cost_for_period()` weights every consumption pair by
+  the PPL **at that time**, not the period average. Material when
+  prices move within a period.
+- v1 prefers `actual_refill_costs` (invoiced) over sensor-detected
+  refills. v2 reads the table but only uses it to compute
+  `percentage_with_actual_data`.
+
+**Recommendation**: ride along with A2. Output payload unchanged
+(same `latest_*` and historical-average keys), values become more
+defensible.
+
+#### A4. Cost: HDD cost metrics + energy efficiency recompute
+
+v1's `calculate_hdd_cost_metrics`, `calculate_cost_metrics_with_efficiency`,
+and `calculate_energy_metrics` derive `cost_per_hdd`,
+`cost_per_useful_kwh`, `energy_efficiency` from real HDD + reading
+data. v2 hard-codes
+`energy_efficiency = boiler.efficiency_pct / 100` (the configured
+nameplate, not measured) and reads `cost_per_hdd` flat from the
+period row.
+
+**Recommendation**: implement once A2 is in (the period generator
+needs HDD + efficiency lookups anyway). Estimate: ~80 lines.
+
+#### A5. Cost: leap-year days_in_month + weighted historical averages
+
+v1: `days_in_month = days_in_year/12` (366/12 in leap years).
+v2: hard-coded `× 30`. Off by ~1.5%. Trivial fix.
+
+v1 weights historical averages by `total_days` per period; v2 takes a
+flat mean across periods. Bigger periods should weigh more.
+
+#### A6. Recalc: status byte decode (logging only, no payload change)
+
+v1's `decode_status()` translated `192/128/144/152` into "Initial sync
+/ Post-sync / Transitional / Normal" for log readability. v2 stores
+the raw byte under `raw_flags` (correct on the wire) but loses
+human-readable state in logs.
+
+**Recommendation**: add the dict + a `logger.info()` call when a
+non-Normal status arrives. Wire format unchanged.
+
+#### A7. CLI: refill management subcommands
+
+The Phase 6 plan called for `--add-refill`, `--list-refills`,
+`--delete-refill`, `--clear-refills`, `--import-historical` as
+subcommands of `python -m kerotrack.cli`. They were skipped to fit
+the overnight scope. The `/api/refills` POST/DELETE routes cover the
+basics, but the import-historical workflow (parse
+`historical_deliveries.txt`) isn't reachable without the CLI.
+
+**Recommendation**: implement after A2 lands. Each subcommand is
+~20–40 lines wrapping the existing service calls.
+
+#### A8. Test: lifespan should verify MQTT + PriceService
+
+`tests/integration/test_lifespan.py` only asserts the engine + DB
+come up. With the live MQTT loop and PriceService now part of the
+lifespan, the test should verify they're on `app.state` and the
+shutdown cleans them up. Trivial extension once A1–A4 stabilise.
+
+### B. Cosmetic / UX
+
+#### B1. Theme toggle is a visual no-op
+
+The `theme` store flips state and the `<html>` `dark`/`light` class
+toggles correctly, but `tailwind.config.ts` palette tokens
+(`bg.page`, `bg.panel`, `text.*`, `border.*`) are hard-coded to the
+dark values regardless of class. Light mode needs either CSS custom
+properties that resolve differently under `:root.light` or palette
+overrides scoped to `.light` selectors. **Dark must remain the
+default per ADR-0004.**
+
+#### B2. Settings: cron next-3-fires preview
+
+`cron-converter` is on the dep list but the SettingField for
+`cron`-typed values doesn't render the next-3-fires preview. Quick
+client-side add.
+
+#### B3. Settings: schedule accordion default-open
+
+The `schedule` group is currently collapsed by default in
+`routes/settings/+page.svelte`. Worth flipping to default-open since
+the user actively edits these.
+
+#### B4. `datetime.utcnow()` deprecation warnings
+
+`prices/cache.py` and `prices/scraper.py` still use `utcnow()` for
+cache freshness deltas. Correct semantically (UTC for relative
+windows) but noisy on Python 3.13+. Migrate to
+`datetime.now(timezone.utc)`.
+
+#### B5. Stale `prices.homefuelsdirect_url` settings row
+
+The catalogue rename to `prices.yournrg_url` left the old key in the
+live DB (seed only inserts missing rows). `SettingsService.all()`
+flags it `"stale": true`. Cleanup migration:
+`DELETE FROM settings WHERE key = 'prices.homefuelsdirect_url'`.
+Harmless until then.
+
+### C. Deferred phase work
+
+#### C1. Frontend Phase 7e–7h ECharts visuals
+
+The Trends, Forecast, Costs and MQTT pages are data-driven stubs.
+Still to land:
 - **Trends** — dual-axis line (oil level + temperature in teal),
-  daily-consumption bars with anomaly amber colouring, HDD scatter with
-  trend line + R², calendar heatmap (year-at-a-glance).
-- **Forecast** — fan chart (median + p25/p75 + p5/p95 envelopes), scenario
-  table, two-segment doughnut for heating/hot-water consumption split.
-- **Costs** — ppl step-line history (constant between reads), bar chart +
-  table for per-period costs, energy-efficiency bars.
-- **MQTT page** — replace the 10-second polling refresh with a live SSE
-  subscription for the in-flight feed flash effect.
-- **Visual review against ADR-0004** — no human sign-off yet against the
-  approved mockup; that remains the acceptance gate for these pages.
+  daily-consumption bars with anomaly amber colouring, HDD scatter
+  with trend line + R², calendar heatmap (year-at-a-glance).
+- **Forecast** — fan chart (median + p25/p75 + p5/p95 envelopes),
+  scenario table, two-segment doughnut for heating/hot-water split.
+- **Costs** — ppl step-line history (constant between reads), bar
+  chart + table for per-period costs, energy-efficiency bars.
+- **MQTT page** — replace the 10-second polling refresh with a live
+  SSE subscription for the in-flight feed flash effect.
 
-### 17.2 Phase 8 housekeeping
+Acceptance gate: visual review against ADR-0004. Best done **after**
+A1–A4 land so the chart inputs are the corrected numbers.
 
-- 30-day archive tarball of `/opt/KeroTrack` from the v1 LXC.
-- `userdel KeroTrack`, `rm -rf /opt/KeroTrack`, remove the systemd units
-  (`KeroTrack-MQTT.service`, `KeroTrack-Web.service`) and cron files
-  (`/etc/cron.d/KeroTrack-Notifier`, `/etc/cron.weekly/KeroTrack-Analysis`,
+#### C2. Playwright e2e wiring
+
+Playwright is configured in `frontend/package.json` but never
+executed (no headless browser overnight). Worth wiring into the
+deploy ritual once C1 lands.
+
+#### C3. Phase 8 housekeeping (operator-driven)
+
+Data already migrated 2026-04-26; v1 LXC is powered off.
+Remaining tasks:
+- 30-day archive tarball of `/opt/KeroTrack` off-host.
+- `userdel KeroTrack`, `rm -rf /opt/KeroTrack` on the v1 LXC.
+- Remove systemd units (`KeroTrack-MQTT.service`,
+  `KeroTrack-Web.service`) and cron files
+  (`/etc/cron.d/KeroTrack-Notifier`,
+  `/etc/cron.weekly/KeroTrack-Analysis`,
   `/etc/cron.monthly/KeroTrack-CostAnalysis`).
-- Optionally power off the LXC entirely (already done at the time of
-  writing).
-- Operator decision: keep v1 systemd units installed for the rollback
-  window (one full notifier cycle) before decommissioning.
-
-### 17.3 Smaller follow-ups
-
-- **Theme toggle is a no-op visually** — the `theme` store flips state and
-  the `<html>` `dark`/`light` class toggles correctly, but Tailwind's
-  `darkMode: "class"` is configured against tokens that already render the
-  dark palette regardless of the class (the colour tokens in
-  `tailwind.config.ts` are hard-coded to the dark values). Light mode needs
-  CSS custom properties that resolve differently under `:root.light`, OR
-  Tailwind palette overrides scoped to the `.light` class. Dark must remain
-  the default per ADR-0004.
-- **Playwright e2e tests** were written into `frontend/package.json` but
-  never executed (no headless browser was available during the autonomous
-  run). Worth wiring into the deploy ritual once the Phase 17.1 pages
-  land.
-- **`datetime.utcnow()` deprecation warnings** still surface in
-  `prices/cache.py` and `prices/scraper.py` — they're correct in UTC for
-  cache freshness deltas, but should be migrated to `datetime.now(UTC)`
-  to silence the Python 3.13+ deprecation.
-- **Stale `prices.homefuelsdirect_url` row** persists in the live
-  settings table from the original seed (the catalogue rename added
-  `prices.yournrg_url` alongside, didn't delete the old). Harmless —
-  `SettingsService.all()` flags stale keys with `"stale": true`. A
-  cleanup migration could `DELETE FROM settings WHERE key = 'prices.homefuelsdirect_url'`
-  but it's not load-bearing.
-- **Settings UI** doesn't yet render a "next 3 fires" preview for cron-
-  typed fields — `cron-converter` is on the dependency list but not wired.
-- **`/api/admin/jobs/*/run`** for analysis/cost-analysis is reachable but
-  the operator-facing affordance for triggering it lives only in the
-  CLI. A "Run now" button on the Settings page is a small frontend add.
-- **`tests/integration/test_lifespan.py`** still asserts the lifespan
-  brings up a happy DB but doesn't verify the MQTT task or the price
-  service — extend it once the next round of fixes lands.
+- Confirm one full notifier cycle (1 week) runs cleanly on v2 before
+  destroying any v1 state — keep systemd units installed during the
+  rollback window.
