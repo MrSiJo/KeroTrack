@@ -155,7 +155,7 @@
       const [latest, hist, readings] = await Promise.all([
         api.analysisLatest(),
         api.analysisHistory(180),
-        api.readings({ limit: 365, order: "asc" }),
+        api.readings({ limit: 25000, order: "asc" }),
       ]);
       analysis = latest;
 
@@ -222,6 +222,18 @@
   let scenarios = $derived(
     analysis ? buildScenarios(analysis, currentLitres) : [],
   );
+  // Fan horizon: clip at 365d max, and at the analysis-projected empty date
+  // when we have one — projecting past zero just reads as misleading flat
+  // bands along the X-axis.
+  let fanHorizonDays = $derived(
+    Math.max(
+      14,
+      Math.min(
+        365,
+        Math.floor(analysis?.estimated_days_remaining ?? 365),
+      ),
+    ),
+  );
 </script>
 
 <div class="space-y-6">
@@ -285,7 +297,7 @@
           history={history}
           meanDailyL={consumptionStats.mean}
           stdDailyL={consumptionStats.std}
-          horizonDays={120}
+          horizonDays={fanHorizonDays}
           height="360px"
         />
       </div>
@@ -320,7 +332,12 @@
     </section>
 
     <section class="space-y-2">
-      <h2 class="text-sm font-semibold">Heating vs hot water split</h2>
+      <div class="flex items-baseline justify-between">
+        <h2 class="text-sm font-semibold">Heating vs hot water split</h2>
+        <span class="text-[11px] text-text-subtle font-mono">
+          latest analysis snapshot · {analysis.latest_analysis_date ?? "—"}
+        </span>
+      </div>
       <div class="rounded-lg border border-border bg-bg-panel p-3">
         {#if (analysis.estimated_daily_heating_consumption_l ?? 0) <= 0 && (analysis.estimated_daily_hot_water_consumption_l ?? 0) <= 0}
           <div

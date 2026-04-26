@@ -35,7 +35,7 @@ def _to_dict(row: Reading) -> dict[str, Any]:
 @router.get("")
 async def list_readings(
     request: Request,
-    limit: int = Query(default=200, ge=1, le=2000),
+    limit: int = Query(default=200, ge=1, le=25000),
     offset: int = Query(default=0, ge=0),
     order: str = Query(default="desc", pattern="^(asc|desc)$"),
     since: str | None = Query(default=None),
