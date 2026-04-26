@@ -749,9 +749,10 @@ These are the live risks to watch as phases execute. Each one is mitigated above
 | 6 — Migration CLI | Done | `Phase 6` commit |
 | 7a — Frontend scaffold + auth UI | Done | `Phase 7` commit |
 | 7b-d — Dashboard, Records, Settings (incl. change-password) | Done | `Phase 7` + dashboard fixes `a92ea5d` |
-| 7e-g — Trends, Forecast, Costs | Done | ECharts visuals shipped in `C1 commit` |
-| 7h — MQTT page | Done | live SSE wiring shipped in `C1 commit` |
+| 7e-g — Trends, Forecast, Costs | Done | ECharts visuals shipped in `627ecda`, chart-data fixes in `b0c0b17` |
+| 7h — MQTT page | Done | live SSE wiring shipped in `627ecda` |
 | 8 — Cutover (operator-driven) | **Mostly done** | data migrated `2026-04-26`, v1 LXC powered off; decommission tasks remaining (see §17 C3) |
+| §18 live shakedown | Done | trends/forecast clip + ONS rebuild + chart fixes (`e74d762`, `bc64d8a`, `cbf665c`, `60e02dc`, `b0c0b17`) |
 
 Update this table after each phase's deploy + verification step.
 
@@ -1122,3 +1123,141 @@ Remaining tasks:
 - Confirm one full notifier cycle (1 week) runs cleanly on v2 before
   destroying any v1 state — keep systemd units installed during the
   rollback window.
+
+---
+
+## 18. Post-backlog live shakedown (delivered 2026-04-26)
+
+After the §17 backlog landed and v2 went into live service, a fresh
+batch of issues surfaced from real data on the dashboard. All fixed +
+deployed the same day. Listed in the order they happened.
+
+### 18.1 Trends 90d/365d → 422 + Forecast horizon clip — `e74d762`
+
+- `/api/readings` `limit` cap raised 2000→25000 (a year of broadcasts is
+  ~17k rows; the page asked for 4 700 / 10 000 and got
+  `Unprocessable Entity`).
+- Forecast fan now clips horizon to `min(365, days_to_empty)` so the
+  chart ends at the projected empty date instead of running off into a
+  meaningless tail.
+- Heating-vs-hot-water split section labels itself a "latest analysis
+  snapshot" with the analysis timestamp (it's a point-in-time read,
+  not a window).
+
+### 18.2 A1 follow-up — `bc64d8a`
+
+`avg_daily_consumption_l` was being fed by the per-pair `_usage_stats`
+total. v1 actually uses a SIMPLE 7-day delta `(earliest − latest) ÷ 7`,
+clamped, with `daily_hw_l` as the floor. The per-pair walker was only
+ever meant for the heating-only component.
+
+The bug surfaced on the first live run: ~5 L/day real draw + ±5 L
+sensor jitter across thousands of broadcasts inflated to 215 L/day,
+collapsing `estimated_days_remaining` to 2.5 days on a near-full tank.
+Regression test seeds 7 days of jittery 30-min broadcasts and asserts
+`avg_daily ∈ [1, 15]` L/day.
+
+### 18.3 ONS-anchored historical PPL correction — `cbf665c` + `60e02dc` + `b0c0b17`
+
+A unique-to-this-instance correction for the 2025 broken-scrape
+window. v1's HomeFuelsDirect scrape was stuck for ~7 months (51.99p
+plateau over 219 days) and v1's monthly cron had also been writing
+spurious refill_period rows (start `2025-04-25 10:03:43` + monthly
+first-of-month endpoints, all sharing `refill_ppl=50.99`). Both came
+across in the migration.
+
+**New code (inert until invoked):**
+- `monthly_avg_ppl` table — ONS RPI Heating Oil monthly averages
+  (series MM23/KJ5U).
+- `kerotrack import-ons-prices --csv series-XXXXX.csv` — parses the
+  ONS CSV (skips header + annual + quarterly rows, divides
+  pence-per-1000L by 1000).
+- `kerotrack rebuild-costs [--src-db PATH] [--apply] [--brief]` —
+  re-detects refill_periods using a `PplResolver` that prefers
+  (1) live-changing sensor PPL, (2) ONS month when sensor stuck for
+  ≥14 days, (3) linear interpolation between real anchors (ONS month,
+  `actual_refill_costs`, first reliable post-fix sensor reading).
+  Read-only by default; `--apply` to write. `--src-db` runs against an
+  alternative DB so a snapshot can be validated before touching the
+  live volume.
+- Spurious migrated rows are filtered by their unique signature
+  (start `2025-04-25 10:03:43` + end `*-01 06:18:02`).
+
+**Math fix landed alongside (`60e02dc`):** `cost.py:_per_pair_cost`
+also moves to `net_consumption × time-weighted-average-PPL`. Without
+this the Sunday cost-analysis cron would silently undo every rebuild
+because `_detect_periods` re-runs on every job invocation. Caught on
+the first apply against live data: rebuild produced £304.62 → next
+cost-analysis run rewrote it to £2 708.07 (the per-pair-sum bug).
+
+**Process — backups + offline validation:**
+- Live snapshot to `legacy/kerotrack-pre-ons-20260426-105509.db`
+  before any code change.
+- ONS CSV imported into a working copy of the snapshot.
+- `historical_deliveries.txt` imported via the existing
+  `import-historical` CLI (8 invoiced refills loaded).
+- Dry-run rebuild against the working copy printed a before/after
+  diff; user reviewed before any write to live.
+- In-container second snapshot at
+  `/app/data/kerotrack.db.preons-20260426-112255` before the apply.
+
+**Live result:** 9 → 2 refill_periods (7 spurious removed), ✓ invoiced
+badge on the 2023-06 → 2024-10 row that matched `10/10/2024`,
+avg_daily £1.28, avg_monthly £39.08, avg_annual £469.01,
+percentage_with_actual_data 50%.
+
+### 18.4 Chart visual fixes — `b0c0b17`
+
+Caught while reviewing the live dashboard:
+
+- **Trends · Daily consumption** was summing `litres_used_since_last`
+  across ~48 broadcasts/day, inflating ~5 L/day real draw to 50 L
+  bars. Switched to `first-minus-last` of `litres_remaining` per
+  calendar day (same approach as the cost rebuild). Year heatmap
+  uses the same derivation.
+- **Costs · PPL history** was fetching `limit:365 order:asc`, which
+  returns the OLDEST 365 readings (back to 2023). Switched to a
+  `since` filter for the trailing 12 months.
+- **Forecast · Fan chart** history was 3 years of dense ingest; now
+  clipped to last 12 months and downsampled to first-reading-per-day.
+- **Forecast · HW split** shows an inline note when today's HDD = 0
+  ("Today's HDD is zero — boiler estimated to be on hot water only")
+  so the 100%-HW donut isn't misread as a bug.
+
+### 18.5 Test count
+
+Backend: **275 tests passing** (was 238 at end of §16; +11 from §17
+A-block, +11 from the rebuild module, +others from intermediate fixes
+and regressions).
+Frontend: **7 tests passing** (unchanged; Playwright config + smoke
+spec landed in §17 C2 but aren't part of the unit count).
+
+---
+
+## 19. Outstanding work
+
+Everything in the original spec, the §17 backlog and the §18 live
+shakedown is done. The only items not closed out are operator-side or
+observation:
+
+- **§17 C3 — Phase 8 housekeeping** (operator-driven, no agent action
+  available):
+  - 30-day archive tarball of `/opt/KeroTrack` off-host.
+  - `userdel KeroTrack` + `rm -rf /opt/KeroTrack` on the v1 LXC.
+  - Remove the v1 systemd units + cron files.
+  - Keep v1 systemd units installed for one full notifier cycle
+    (1 week) post-cutover as the rollback window.
+- **Sunday 2026-05-03 notifier** — the first scheduled v2 notifier
+  run in production. Worth eyeballing the Gotify message to confirm
+  the rich Markdown + refill-aware deltas land correctly off real data.
+- **Next real refill** — once a delivery happens, the sensor will
+  flag a new refill marker. `_detect_periods` will pair it with the
+  migrated 2025-04-25 marker and produce a third refill_periods row
+  spanning the 2025-04 → 2026-NN window. This will be the first row
+  that uses the post-fix BoilerJuice scrape data (~106p) for its
+  cost calculation; values should come out reasonable without needing
+  the rebuild routine.
+- **`legacy/kerotrack-pre-ons-20260426-105509.db`** snapshot retained
+  in a gitignored directory. Safe to keep until the next refill
+  cycle confirms cost analysis still produces sane numbers, then
+  delete.
