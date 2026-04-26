@@ -2,8 +2,9 @@
   import { onDestroy, onMount } from "svelte";
   import * as echarts from "echarts";
 
-  import StatCard from "$lib/components/StatCard.svelte";
   import ForecastFan from "$lib/components/ForecastFan.svelte";
+  import HeroForecast from "$lib/components/HeroForecast.svelte";
+  import StatCard from "$lib/components/StatCard.svelte";
   import { api } from "$lib/api";
   import { KEROTRACK_DARK_THEME } from "$lib/charts/theme";
   import type { AnalysisResult, Reading } from "$lib/types/api";
@@ -247,6 +248,8 @@
 </script>
 
 <div class="space-y-6">
+  <HeroForecast size="full" />
+
   <div>
     <h1 class="text-lg font-semibold">Forecast</h1>
     <p class="text-xs text-text-muted">
