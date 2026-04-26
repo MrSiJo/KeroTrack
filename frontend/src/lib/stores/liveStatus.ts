@@ -48,12 +48,13 @@ function createLiveStatus() {
     if (typeof window === "undefined") return;
     if (source) return;
     source = new EventSource("/api/stream", { withCredentials: true });
-    source.addEventListener("reading", () => {
+    const onAny = () => {
       void refresh();
-    });
-    source.addEventListener("analysis", () => {
-      void refresh();
-    });
+    };
+    source.addEventListener("reading", onAny);
+    source.addEventListener("analysis", onAny);
+    source.addEventListener("cost_analysis", onAny);
+    source.addEventListener("mqtt_message", onAny);
     source.onerror = () => {
       // browser will auto-reconnect; nothing to do
     };

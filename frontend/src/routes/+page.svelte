@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import RunPanel from "$lib/components/RunPanel.svelte";
   import StatCard from "$lib/components/StatCard.svelte";
   import TankSilhouette from "$lib/components/TankSilhouette.svelte";
   import { liveStatus } from "$lib/stores/liveStatus";
@@ -176,6 +177,10 @@
         </div>
       {/if}
     </div>
+  </section>
+
+  <section class="col-span-12">
+    <RunPanel />
   </section>
 
   {#if reading == null}

@@ -328,26 +328,29 @@ def _entries() -> list[SettingDef]:
 
     # schedule -----------------------------------------------------------
     e += [
+        # Sunday morning cadence: analysis 06:00 → cost analysis 07:00 →
+        # notifier 08:00. Notifier uses its internal weekly + first-Sunday
+        # predicate for the body so a Sunday-only cron is fine.
         SettingDef(
             "schedule.analysis_cron",
             "cron",
             "schedule",
             "Analysis cron",
-            "0 2 * * 0",
+            "0 6 * * 0",
         ),
         SettingDef(
             "schedule.cost_analysis_cron",
             "cron",
             "schedule",
             "Cost analysis cron",
-            "0 3 1 * *",
+            "0 7 * * 0",
         ),
         SettingDef(
             "schedule.notifier_cron",
             "cron",
             "schedule",
             "Notifier cron",
-            "0 8 * * *",
+            "0 8 * * 0",
         ),
     ]
 
