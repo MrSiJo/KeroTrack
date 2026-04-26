@@ -172,16 +172,29 @@ def _avg_efficiency_decimal(readings: list[Reading]) -> float | None:
 def _per_pair_cost(
     readings: list[Reading], days: float, refill_threshold_l: float
 ) -> dict[str, float]:
-    """v1's calculate_cost_for_period — per-pair walker using PPL-at-time.
+    """Net-consumption × time-weighted-average-PPL period cost.
 
-    Returns total_cost, total_consumption, average_ppl (pence), daily_cost,
-    daily_consumption, weekly_cost, monthly_cost, period_days, estimated_consumption."""
+    Per-pair cost summing breaks badly on dense ingest data: every bit
+    of sensor jitter that produces a positive momentary drop gets
+    counted, so a window with 502 L net consumption and 8 000 broadcast
+    pairs sums to ~4 300 L of phantom positive deltas (~8x cost
+    inflation). This formulation is mathematically correct: total cost
+    is the actual net litres consumed × the average pence-per-litre
+    weighted by the duration each PPL value was in force.
+
+    `refill_threshold_l` is retained on the signature for compatibility
+    but no longer needed — net consumption inherently ignores
+    intermediate refills.
+    """
+    _ = refill_threshold_l  # kept for callers + future use
     if len(readings) < 2:
         return {}
     sorted_readings = sorted(readings, key=lambda r: r.date)
     first = sorted_readings[0]
     last = sorted_readings[-1]
-    total_consumption = float(first.litres_remaining or 0) - float(last.litres_remaining or 0)
+    total_consumption = (
+        float(first.litres_remaining or 0) - float(last.litres_remaining or 0)
+    )
     estimated = False
     if total_consumption <= 0:
         # Tank somehow ended higher — fall back to a tiny synthetic estimate
@@ -190,31 +203,37 @@ def _per_pair_cost(
         total_consumption = days_int * MIN_CONSUMPTION_PER_DAY_FALLBACK
         estimated = True
 
-    total_cost = 0.0
     if estimated:
-        ppl = float(last.current_ppl or 0) / 100.0
-        total_cost = total_consumption * ppl
+        ppl_pence = float(last.current_ppl or 0)
+        total_cost = total_consumption * (ppl_pence / 100.0)
+        average_ppl = round(ppl_pence, 2)
     else:
+        weighted_ppl_days = 0.0
+        total_days = 0.0
         for prev, curr in zip(sorted_readings, sorted_readings[1:]):
-            consumption = (
-                float(prev.litres_remaining or 0) - float(curr.litres_remaining or 0)
-            )
-            if consumption < -refill_threshold_l:
+            prev_dt = parse_local(prev.date)
+            curr_dt = parse_local(curr.date)
+            if prev_dt is None or curr_dt is None:
                 continue
-            if consumption <= 0:
+            delta_days = (curr_dt - prev_dt).total_seconds() / 86400.0
+            if delta_days <= 0:
                 continue
-            ppl = float(prev.current_ppl or 0) / 100.0
-            total_cost += consumption * ppl
+            ppl_pence = float(prev.current_ppl or 0)
+            if ppl_pence <= 0:
+                continue
+            weighted_ppl_days += ppl_pence * delta_days
+            total_days += delta_days
+        if total_days > 0:
+            average_ppl = weighted_ppl_days / total_days
+        else:
+            average_ppl = float(last.current_ppl or 0)
+        total_cost = total_consumption * (average_ppl / 100.0)
+        average_ppl = round(average_ppl, 2)
 
     days = max(days, 1.0)
     year = parse_local(first.date).year if parse_local(first.date) else local_now().year
     days_in_month = _days_in_month_for(year)
 
-    average_ppl = (
-        round((total_cost / total_consumption) * 100, 2)
-        if total_consumption > 0
-        else float(last.current_ppl or 0)
-    )
     return {
         "total_cost": round(total_cost, 2),
         "total_consumption": round(total_consumption, 2),
