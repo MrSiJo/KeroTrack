@@ -319,6 +319,79 @@ async def _refill_import_historical(args: argparse.Namespace) -> int:
     return await _with_session(_do)
 
 
+# ----- ONS / cost rebuild (one-shot historical correction) ------------
+
+
+async def _import_ons_prices(args: argparse.Namespace) -> int:
+    from kerotrack.analysis.cost_rebuild import import_ons_csv
+
+    async def _do(sf):
+        count = await import_ons_csv(sf, csv_path=Path(args.csv))
+        print(json.dumps({"imported": count, "csv": args.csv}, indent=2))
+        return 0
+
+    return await _with_session(_do)
+
+
+async def _rebuild_costs(args: argparse.Namespace) -> int:
+    """Rebuild refill_periods using the PPL resolver. Default is dry-run.
+
+    Pass ``--apply`` to actually mutate the DB. ``--src-db PATH`` lets
+    you point at a snapshot copy so you can validate offline first.
+    """
+    from kerotrack.analysis.cost_rebuild import rebuild_periods
+
+    async def _do(sf):
+        svc = SettingsService(sf)
+        report = await rebuild_periods(sf, svc, apply=args.apply)
+        if args.brief:
+            slim = {k: v for k, v in report.items() if k not in ("before", "after")}
+            slim["before_summary"] = [
+                {
+                    "start": p["start_date"],
+                    "end": p["end_date"],
+                    "days": p["days"],
+                    "total_cost": p["total_cost"],
+                    "avg_ppl": p["average_ppl"],
+                }
+                for p in report["before"]
+            ]
+            slim["after_summary"] = [
+                {
+                    "start": p["start_date"],
+                    "end": p["end_date"],
+                    "days": p["days"],
+                    "total_cost": p["total_cost"],
+                    "avg_ppl": p["average_ppl"],
+                    "used_actual": p["used_actual_cost"],
+                }
+                for p in report["after"]
+            ]
+            print(json.dumps(slim, indent=2, default=str))
+        else:
+            print(json.dumps(report, indent=2, default=str))
+        return 0
+
+    if args.src_db:
+        # Spin up an isolated engine against the alternative DB. Used
+        # for validating the rebuild against a snapshot before touching
+        # the live volume.
+        boot = get_bootstrap()
+        src_path = Path(args.src_db).resolve()
+        url = f"sqlite+aiosqlite:///{src_path.as_posix()}"
+        engine = init_engine(url)
+        await ensure_schema(engine)
+        sf = session_factory(engine)
+        async with sf() as session:
+            await seed_defaults(session)
+        try:
+            return await _do(sf)
+        finally:
+            await engine.dispose()
+        return 0
+    return await _with_session(_do)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="kerotrack")
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -395,6 +468,43 @@ def _build_parser() -> argparse.ArgumentParser:
         "--force", action="store_true", help="Overwrite existing rows"
     )
     import_hist.set_defaults(func=_refill_import_historical)
+
+    # ----- one-shot historical PPL correction (this instance only) ------
+    ons = sub.add_parser(
+        "import-ons-prices",
+        help="Import ONS RPI heating-oil monthly averages into monthly_avg_ppl",
+    )
+    ons.add_argument(
+        "--csv", required=True, help="Path to series-XXXXX.csv from ONS"
+    )
+    ons.set_defaults(func=_import_ons_prices)
+
+    rebuild = sub.add_parser(
+        "rebuild-costs",
+        help=(
+            "Re-detect refill_periods using ONS + actual_refill_costs + "
+            "first-reliable-sensor anchors. Read-only by default; pass "
+            "--apply to write."
+        ),
+    )
+    rebuild.add_argument(
+        "--src-db",
+        help=(
+            "Run against an alternative DB path (e.g. a snapshot copy). "
+            "When omitted, uses the live DATABASE_URL."
+        ),
+    )
+    rebuild.add_argument(
+        "--apply",
+        action="store_true",
+        help="Persist changes. Without this, prints a dry-run report only.",
+    )
+    rebuild.add_argument(
+        "--brief",
+        action="store_true",
+        help="Print a slim before/after summary instead of full payloads",
+    )
+    rebuild.set_defaults(func=_rebuild_costs)
 
     return parser
 

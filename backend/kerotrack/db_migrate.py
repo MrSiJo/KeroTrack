@@ -28,6 +28,7 @@ from kerotrack.models import hdd as _hdd  # noqa: F401
 from kerotrack.models import energy_metric as _em  # noqa: F401
 from kerotrack.models import cost_analysis as _ca  # noqa: F401
 from kerotrack.models import user as _user  # noqa: F401
+from kerotrack.models import monthly_ppl as _mppl  # noqa: F401
 
 
 async def ensure_schema(engine: AsyncEngine) -> None:
