@@ -94,26 +94,39 @@
     })),
   );
 
-  // Daily consumption: sum litres_used_since_last per calendar day,
-  // ignoring negative values (refill spikes).
+  // Daily consumption: first-minus-last of litres_remaining per
+  // calendar day. Summing `litres_used_since_last` over per-30-min
+  // broadcasts is wrong — it counts every blip of sensor jitter as
+  // consumption (e.g. 50 L/day on a tank that drops 5 L/day net).
+  // Negative values (refill days) clamp to zero.
   let dailyConsumption = $derived.by(() => {
-    const buckets = new Map<string, number>();
+    type DayBucket = { first: number | null; last: number | null };
+    const buckets = new Map<string, DayBucket>();
     for (const r of readings) {
-      const used = r.litres_used_since_last;
-      if (used == null || !Number.isFinite(used) || used <= 0) continue;
+      const litres = r.litres_remaining;
+      if (litres == null || !Number.isFinite(litres)) continue;
       const k = dayKey(r.date);
-      buckets.set(k, (buckets.get(k) ?? 0) + used);
+      const b = buckets.get(k) ?? { first: null, last: null };
+      if (b.first === null) b.first = litres;
+      b.last = litres;
+      buckets.set(k, b);
     }
-    const entries = Array.from(buckets.entries()).sort(([a], [b]) =>
-      a < b ? -1 : a > b ? 1 : 0,
-    );
-    const values = entries.map(([, v]) => v);
+    const entries = Array.from(buckets.entries())
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([date, b]) => {
+        const used =
+          b.first !== null && b.last !== null ? b.first - b.last : 0;
+        // Clamp negative (refill days). Tiny positives < 0.05L are noise.
+        const y = used > 0.05 ? used : 0;
+        return [date, y] as const;
+      });
+    const values = entries.map(([, v]) => v).filter((v) => v > 0);
     const mean =
       values.length > 0 ? values.reduce((s, v) => s + v, 0) / values.length : 0;
     const threshold = mean * 1.5;
     return entries.map(([date, value]) => ({
       x: date,
-      y: Number(value.toFixed(3)),
+      y: Number(value.toFixed(2)),
       anomaly: mean > 0 && value > threshold,
     }));
   });
@@ -143,18 +156,24 @@
   });
 
   // Year heatmap data: daily consumption from full year window.
+  // Same first-minus-last-per-day approach as the bar chart.
   let yearDaily = $derived.by(() => {
-    const buckets = new Map<string, number>();
+    type DayBucket = { first: number | null; last: number | null };
+    const buckets = new Map<string, DayBucket>();
     for (const r of yearReadings) {
-      const used = r.litres_used_since_last;
-      if (used == null || !Number.isFinite(used) || used <= 0) continue;
+      const litres = r.litres_remaining;
+      if (litres == null || !Number.isFinite(litres)) continue;
       const k = dayKey(r.date);
-      buckets.set(k, (buckets.get(k) ?? 0) + used);
+      const b = buckets.get(k) ?? { first: null, last: null };
+      if (b.first === null) b.first = litres;
+      b.last = litres;
+      buckets.set(k, b);
     }
-    return Array.from(buckets.entries()).map(([date, value]) => ({
-      date,
-      value: Number(value.toFixed(3)),
-    }));
+    return Array.from(buckets.entries()).map(([date, b]) => {
+      const used =
+        b.first !== null && b.last !== null ? b.first - b.last : 0;
+      return { date, value: Number((used > 0.05 ? used : 0).toFixed(2)) };
+    });
   });
 
   let currentYear = $derived(new Date().getUTCFullYear());

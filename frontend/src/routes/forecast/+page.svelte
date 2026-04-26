@@ -159,12 +159,22 @@
       ]);
       analysis = latest;
 
-      const series: HistoryPoint[] = (readings.items ?? [])
-        .filter((r: Reading) => r.litres_remaining != null)
-        .map((r: Reading) => ({
-          date: r.date,
-          litres: Number(r.litres_remaining),
-        }));
+      // Keep history compact: last 12 months, one point per day
+      // (downsampled to first reading of each calendar day) so the fan
+      // chart's run-up isn't drowned out by 17k of sensor broadcasts.
+      const cutoff = new Date();
+      cutoff.setUTCDate(cutoff.getUTCDate() - 365);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
+      const seenDays = new Set<string>();
+      const series: HistoryPoint[] = [];
+      for (const r of readings.items ?? []) {
+        if (r.litres_remaining == null) continue;
+        const day = (r.date ?? "").slice(0, 10);
+        if (!day || day < cutoffStr) continue;
+        if (seenDays.has(day)) continue;
+        seenDays.add(day);
+        series.push({ date: r.date, litres: Number(r.litres_remaining) });
+      }
       history = series;
 
       const histSorted = [...(hist.items ?? [])].sort((a, b) =>
@@ -338,6 +348,11 @@
           latest analysis snapshot · {analysis.latest_analysis_date ?? "—"}
         </span>
       </div>
+      {#if (analysis.estimated_daily_heating_consumption_l ?? 0) === 0 && (analysis.estimated_daily_hot_water_consumption_l ?? 0) > 0}
+        <p class="text-[11px] text-text-subtle">
+          Today's HDD is zero — boiler estimated to be on hot water only.
+        </p>
+      {/if}
       <div class="rounded-lg border border-border bg-bg-panel p-3">
         {#if (analysis.estimated_daily_heating_consumption_l ?? 0) <= 0 && (analysis.estimated_daily_hot_water_consumption_l ?? 0) <= 0}
           <div

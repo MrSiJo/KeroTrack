@@ -182,7 +182,15 @@
       error = (err as Error).message;
     }
     try {
-      const r = await api.readings({ limit: 365, order: "asc" });
+      // Last 12 months of readings — `order: asc` from a since-filter
+      // gives chronological order with the freshest values at the right.
+      const since = new Date();
+      since.setUTCDate(since.getUTCDate() - 365);
+      const r = await api.readings({
+        limit: 25000,
+        order: "asc",
+        since: `${since.toISOString().slice(0, 10)} 00:00:00`,
+      });
       pplHistory = buildPplHistory(r.items ?? []);
     } catch (err) {
       // Non-fatal — leave empty state.
@@ -250,7 +258,7 @@
   <section class="rounded-lg border border-border bg-bg-panel">
     <header class="flex items-baseline justify-between border-b border-border px-4 py-2">
       <h2 class="text-sm font-semibold">Price per litre — history</h2>
-      <span class="text-xs text-text-muted">last 365 readings</span>
+      <span class="text-xs text-text-muted">last 12 months</span>
     </header>
     <div class="p-3">
       {#if pplHistory.length > 0}
