@@ -739,18 +739,217 @@ These are the live risks to watch as phases execute. Each one is mitigated above
 
 | Phase | Status | Commit |
 |---|---|---|
-| 0 — Scaffold | Done | (this commit) |
-| 1 — Settings foundation | Done | (this commit) |
-| 2 — DB engine, lifespan, health | Done | (this commit) |
-| 2.5 — Auth foundation (single-user, JobTrack pattern) | Done | (this commit) |
-| 3 — Data layer (parallel) | Done | (this commit) |
-| 4 — Scheduled jobs (parallel) | Done | (previous commit) |
-| 5 — API surface | Done | (previous commit) |
-| 6 — Migration CLI | Done | (this commit) |
-| 7a — Frontend scaffold + auth UI | Done | (this commit) |
-| 7b-d — Dashboard, Records, Settings (incl. change-password) | Done | (this commit) |
-| 7e-g — Trends, Forecast, Costs | Stubbed (this commit) — full ECharts visuals deferred |
-| 7h — MQTT page | Done (basic feed) | (this commit) — live SSE wiring deferred |
-| 8 — Cutover (operator-triggered, deferred) | Pending | |
+| 0 — Scaffold | Done | `6dd81e1` |
+| 1 — Settings foundation | Done | `Phase 1` commit |
+| 2 — DB engine, lifespan, health | Done | `Phase 2` commit |
+| 2.5 — Auth foundation (single-user, JobTrack pattern) | Done | `Phase 2.5` commit |
+| 3 — Data layer (parallel) | Done | `Phase 3` commit (live MQTT wired in `42f7018`) |
+| 4 — Scheduled jobs (parallel) | Done | `Phase 4` commit |
+| 5 — API surface | Done | `Phase 5` commit |
+| 6 — Migration CLI | Done | `Phase 6` commit |
+| 7a — Frontend scaffold + auth UI | Done | `Phase 7` commit |
+| 7b-d — Dashboard, Records, Settings (incl. change-password) | Done | `Phase 7` + dashboard fixes `a92ea5d` |
+| 7e-g — Trends, Forecast, Costs | Stubbed | full ECharts visuals deferred (see §17) |
+| 7h — MQTT page | Done (basic feed) | live SSE wiring deferred |
+| 8 — Cutover (operator-driven) | **Mostly done** | data migrated `2026-04-26`, v1 LXC powered off; decommission tasks remaining (see §17) |
 
 Update this table after each phase's deploy + verification step.
+
+---
+
+## 16. Post-Phase-7 follow-up work (delivered 2026-04-26)
+
+After the autonomous run completed Phases 0–7, the operator brought the
+container into live service and a number of issues surfaced that needed
+fixing before v1 could be retired. All of them are committed and deployed.
+
+### 16.1 Phase 8 — production cutover (executed)
+
+The plan deferred Phase 8 to the operator. In practice it was driven by
+agent + operator together on `2026-04-26`:
+
+1. **v1 snapshot pulled to local `legacy/`**:
+   `scp root@172.16.0.14:/opt/KeroTrack/data/{KeroTrack_data.db,historical_deliveries.txt} root@172.16.0.14:/opt/KeroTrack/config/config.yaml legacy/`
+2. **Files staged into the running backend container** via
+   `docker cp legacy/KeroTrack_data.db kerotrack-api:/tmp/v1.db` etc.
+3. **Migrator run with `--force`** against the deployed v2 stack:
+   `docker exec kerotrack-api python -m kerotrack.cli migrate-v1
+    --src-db /tmp/v1.db --src-config /tmp/v1.yaml
+    --report /app/data/migration-report.json --force`
+4. **Result**: 17,310 readings · 9 refill periods · 12 HDD rows · 11 cost
+   analyses · 42 settings imported. 6,669 `analysis_results` rows skipped
+   due to v1's NULL-PK quirk on `latest_reading_date` (data not lost — the
+   scheduler's analysis run regenerates them clean). The single-user
+   account created at first-time `/setup` was **not** touched by the
+   migrator.
+5. **Operator stopped the v1 LXC** at `172.16.0.14`. KeroTrack-display +
+   HA continue to read from the shared `172.16.0.32` broker without
+   configuration changes.
+
+**What still owes from §10 step 7** (operator-driven):
+- Snapshot tarball off-host for 30-day retention.
+- `userdel KeroTrack`, `rm -rf /opt/KeroTrack`, remove the systemd units
+  and cron files on the v1 LXC (or just leave the LXC powered off).
+- Confirm one full notifier cycle (1 week) runs cleanly on v2 before
+  destroying any v1 state.
+
+### 16.2 Live MQTT ingest (Phase 3c made real) — `42f7018`
+
+Phase 3c shipped the recalc/publish/pubsub modules but left the aiomqtt
+loop dormant. The post-cutover commit replaced the dormant publisher with
+a real subscriber/publisher loop:
+
+- `ingest/mqtt.MqttIngest.run()` connects with exponential backoff,
+  subscribes to `mqtt.topic_readings`, and consumes messages through
+  `handle_payload` → recalc → DB → publish → pubsub.
+- Idle when `mqtt.broker == "localhost"` (the operator-safe default),
+  reconnects on `mqtt.*` settings change via the on-change hook.
+- `_AiomqttPublisherAdapter` keeps `app.state.publisher` stable across
+  reconnects — analysis/cost jobs publish through the same handle.
+- `app.state.mqtt.connected` is what `/api/health.mqtt_connected` reads.
+
+YAML mapping fix (same commit): `migration/yaml_mapping.py` now picks the
+RTL_433-shaped entry (the one whose `name` contains `RTL_433toMQTT`) for
+`mqtt.topic_readings`. v1 stored the SUBSCRIBE topic differently from
+the publish topics; the original mapping picked the publish topic by
+mistake and ingested nothing.
+
+### 16.3 Dashboard fixes — `a92ea5d`
+
+Visual issues caught on first use:
+- `TankSilhouette.svelte` rewritten with a real coloured fill
+  (gradient, clipped to the rounded inner rect) at the live
+  percentage; 25/50/75% tick marks; waterline; tone shifts
+  amber<25% / red<15% per ADR-0004.
+- 10-bar vertical gauge from the mockup added next to the tank,
+  driven by `bars_remaining` (or derived from pct).
+- `StatCard` got a `compact` mode to remove empty-space padding.
+- Dashboard reorganised: tank hero owns the percentage; the duplicate
+  "Percentage" card is gone; nine real stats now pack the grid;
+  refill/leak/low-level alert pills shown inline only when active.
+
+### 16.4 Notifier — rich Markdown format restored — `b06bdc1`
+
+The Phase 4 stub sent a 3-line plain-text body. Ported verbatim from
+v1's `notifier.py`:
+
+- Refill-aware weekly + monthly usage maths (positive deltas as refills,
+  negative accumulated as usage; clamped ≥ 0).
+- Trend arrow logic (⬆️/⬇️/➖) with combined L / £ / % delta string.
+- Markdown body with Tank Level / Weekly Usage / Trend / Est. Empty
+  sections; refill notice line when weekly_refill_volume > 0; monthly
+  block appended on first-Sunday or test mode.
+- Gotify URLs auto-tagged `?format=markdown` so the body renders.
+- `apprise.notify(..., body_format=NotifyFormat.MARKDOWN)`.
+
+### 16.5 Live ingest — populate price + scope previous-reading lookup — `e51aa17`
+
+Two regressions caught on the first real reading from the lilygo:
+
+1. **`current_ppl`/`cost_used`/`cost_to_fill` collapsed to 0/"0.00"**
+   because `RecalcContext.current_ppl` was never populated and ingest had
+   no price source plumbed in. Added `prices/service.PriceService` — a
+   long-lived async wrapper over the Phase 3 scraper + cache — and threaded
+   `prices.current_ppl` into `MqttIngest` as a `price_provider`. Provider
+   failure degrades gracefully to `0.00`, payload still ingested.
+
+2. **`litres_used_since_last` collapsed to 0** because `_load_previous`
+   matched rows AT or AFTER the new payload's timestamp (e.g. duplicates
+   or already-migrated rows at the same minute). Now scopes the lookup to
+   `WHERE date < new_date`.
+
+### 16.6 Prices — BoilerJuice parser fix + YourNRG replacement — `3510614`
+
+- **BoilerJuice parser** previously grabbed the first
+  `<span class="font-weight-bold">` (the logo) and bailed. Now walks all
+  bold spans, requires "per litre" in the text, sanity-bounds 30–500 ppl.
+  Live page returned 106.95 ppl; new parser picks it up.
+- **HomeFuelsDirect's domestic page is gone.** Replaced with **YourNRG**
+  (`https://yournrg.co.uk/domestic/heating-oil-prices`). The page renders
+  prices via JS, but the underlying Umbraco API
+  `/Umbraco/Surface/InformationPageSurface/GetCurrentAveragePrices`
+  returns clean JSON. New scraper hits that endpoint and returns
+  500/750/1000 L prices; the 500 L value is the fallback headline that
+  matches v1 semantics.
+- Setting catalogue: `prices.homefuelsdirect_url` renamed to
+  `prices.yournrg_url`. v1's `oil_prices.url` demoted to "ignored" by
+  the migrator so operators on the dead URL get the working default.
+
+### 16.7 DST/timezone correctness — `c4857fd`
+
+v1 stored naive `'YYYY-MM-DD HH:MM:SS'` strings produced by
+`datetime.now()` on a Europe/London LXC. v2 inadvertently switched to
+`datetime.utcnow()` in ingest, analysis, and cost paths — the same
+wall-clock string but interpreted as UTC, silently shifting every BST
+reading by an hour and breaking age/diff maths.
+
+Added `kerotrack/clock.py`: `local_now()` / `local_now_str()` /
+`parse_local()` all key off `Bootstrap.tz` (default `Europe/London`).
+On-disk representation unchanged — every delta calculation now respects
+DST automatically. Sites switched off UTC: ingest payload normaliser,
+analysis consumption, analysis cost, /api/health age computation, and
+the notifier `now` default.
+
+### 16.8 Test count
+
+Backend: **238 tests passing** (up from 219 at end of Phase 7).
+Frontend: **7 tests passing** (unchanged).
+
+---
+
+## 17. What's still left
+
+### 17.1 Frontend visuals (deferred from Phase 7)
+
+The Trends, Forecast, and Costs pages are *data-driven stubs* — they
+fetch and show real API data but the rich ECharts visuals from ADR-0004
+haven't been implemented. Still to land:
+
+- **Trends** — dual-axis line (oil level + temperature in teal),
+  daily-consumption bars with anomaly amber colouring, HDD scatter with
+  trend line + R², calendar heatmap (year-at-a-glance).
+- **Forecast** — fan chart (median + p25/p75 + p5/p95 envelopes), scenario
+  table, two-segment doughnut for heating/hot-water consumption split.
+- **Costs** — ppl step-line history (constant between reads), bar chart +
+  table for per-period costs, energy-efficiency bars.
+- **MQTT page** — replace the 10-second polling refresh with a live SSE
+  subscription for the in-flight feed flash effect.
+- **Visual review against ADR-0004** — no human sign-off yet against the
+  approved mockup; that remains the acceptance gate for these pages.
+
+### 17.2 Phase 8 housekeeping
+
+- 30-day archive tarball of `/opt/KeroTrack` from the v1 LXC.
+- `userdel KeroTrack`, `rm -rf /opt/KeroTrack`, remove the systemd units
+  (`KeroTrack-MQTT.service`, `KeroTrack-Web.service`) and cron files
+  (`/etc/cron.d/KeroTrack-Notifier`, `/etc/cron.weekly/KeroTrack-Analysis`,
+  `/etc/cron.monthly/KeroTrack-CostAnalysis`).
+- Optionally power off the LXC entirely (already done at the time of
+  writing).
+- Operator decision: keep v1 systemd units installed for the rollback
+  window (one full notifier cycle) before decommissioning.
+
+### 17.3 Smaller follow-ups
+
+- **Playwright e2e tests** were written into `frontend/package.json` but
+  never executed (no headless browser was available during the autonomous
+  run). Worth wiring into the deploy ritual once the Phase 17.1 pages
+  land.
+- **`datetime.utcnow()` deprecation warnings** still surface in
+  `prices/cache.py` and `prices/scraper.py` — they're correct in UTC for
+  cache freshness deltas, but should be migrated to `datetime.now(UTC)`
+  to silence the Python 3.13+ deprecation.
+- **Stale `prices.homefuelsdirect_url` row** persists in the live
+  settings table from the original seed (the catalogue rename added
+  `prices.yournrg_url` alongside, didn't delete the old). Harmless —
+  `SettingsService.all()` flags stale keys with `"stale": true`. A
+  cleanup migration could `DELETE FROM settings WHERE key = 'prices.homefuelsdirect_url'`
+  but it's not load-bearing.
+- **Settings UI** doesn't yet render a "next 3 fires" preview for cron-
+  typed fields — `cron-converter` is on the dependency list but not wired.
+- **`/api/admin/jobs/*/run`** for analysis/cost-analysis is reachable but
+  the operator-facing affordance for triggering it lives only in the
+  CLI. A "Run now" button on the Settings page is a small frontend add.
+- **`tests/integration/test_lifespan.py`** still asserts the lifespan
+  brings up a happy DB but doesn't verify the MQTT task or the price
+  service — extend it once the next round of fixes lands.
