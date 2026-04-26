@@ -1,5 +1,6 @@
 <script lang="ts">
   import { stringToArray, getSchedule } from "cron-converter";
+  import cronstrue from "cronstrue";
   import { api, ApiError } from "$lib/api";
   import { settings } from "$lib/stores/settings";
   import { activeGroup, search } from "$lib/stores/settingsUi";
@@ -26,6 +27,15 @@
     if (item.is_secret) return "";
     return pending[item.key] !== undefined ? pending[item.key] : item.value;
   }
+  function describeCron(expr: string): string {
+    if (!expr || typeof expr !== "string") return "";
+    try {
+      return cronstrue.toString(expr.trim(), { use24HourTimeFormat: true });
+    } catch {
+      return "";
+    }
+  }
+
   function nextCronFires(expr: string, count = 3): string[] {
     if (!expr || typeof expr !== "string") return [];
     try {
@@ -283,6 +293,12 @@
                 value={cronValue}
                 oninput={(e) => onChange(item.key, (e.currentTarget as HTMLInputElement).value)}
               />
+              {#if cronValue.trim()}
+                {@const human = describeCron(cronValue)}
+                {#if human}
+                  <div class="mt-1 text-[11px] text-text-muted">{human}</div>
+                {/if}
+              {/if}
               {#if fires.length > 0}
                 <div class="mt-1 space-y-0.5 text-xs text-text-subtle">
                   <div class="font-medium text-text-muted">Next 3 fires:</div>
