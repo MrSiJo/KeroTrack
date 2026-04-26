@@ -4,6 +4,7 @@
   import { settings } from "$lib/stores/settings";
   import { activeGroup, search } from "$lib/stores/settingsUi";
   import type { SettingDef, SettingItem } from "$lib/types/api";
+  import RunPanel from "$lib/components/RunPanel.svelte";
 
   type Props = {
     pending: Record<string, unknown>;
@@ -133,6 +134,10 @@
         {pwSubmitting ? "Updating…" : "Update password"}
       </button>
     </form>
+  {:else if $activeGroup === "maintenance" && !$search.trim()}
+    <div class="px-4 py-4">
+      <RunPanel />
+    </div>
   {:else}
     <div class="divide-y divide-border">
       {#each visibleItems() as item (item.key)}

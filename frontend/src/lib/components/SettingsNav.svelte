@@ -6,6 +6,7 @@
     const entries = Object.entries($settings.groups).map(
       ([g, items]) => ({ group: g, count: items.length }),
     );
+    entries.push({ group: "maintenance", count: 1 });
     entries.push({ group: "account", count: 1 });
     return entries;
   });
