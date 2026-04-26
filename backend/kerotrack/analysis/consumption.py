@@ -4,12 +4,26 @@ Reads from `readings`, computes the analysis payload (every key per spec
 §3.2 and the HA contract §3.2 extension), persists to `analysis_results`,
 and publishes the full payload to `oiltank/analysis`.
 
-The v1 implementation was 587 lines including its own logging + config
-plumbing. This is a tighter port that preserves the output contract, the
-HDD-driven projections, the seasonal heating factor, and the days-to-empty
-estimate. The detailed weather-data integration of v1 isn't part of v2.0
-scope (HDD comes from the DB, no live API calls) — operators can refine
-the heating-factor coefficients in settings.
+This is the v1 algorithm restored (backlog A1):
+
+1. Hot-water baseline derived from boiler.fuel_rate_l_per_h × 10 scheduled
+   sessions/week × 0.5h ÷ 7 × 1.1 buffer; used as a floor on per-day
+   consumption when HDD=0 so summer days don't deflate the average.
+2. Bounded look-back window: ``min(60, max(30, days_since_refill))`` so a
+   long post-refill window doesn't get poisoned by stale summer averages.
+3. Per-pair refill-aware walker for `total_consumption` (rejects negative
+   spikes greater than `detection.refill_threshold_l`).
+4. Heating estimate blends 7-day vs long-window components (0.65/0.35),
+   scales by `today_HDD/avg_7d_HDD` clamped 0.6-1.6, then clamps the
+   result to [MIN_HEATING_L, MAX_HEATING_L].
+5. Monthly seasonal heating factor from real Nest hours data
+   (78,43,43,21,3,0,0,0,0,5,29,37) — April resolves to ~0.27 instead of
+   the bucketed 0.7 the first port used.
+6. ``estimated_days_remaining`` capped at 400 (HDD>0) or 700 (HDD=0) so
+   summer scenarios don't produce multi-thousand-day projections.
+
+Output shape is unchanged — every key in spec §3.2 still present, same
+types, same rounding.
 """
 
 from __future__ import annotations
@@ -34,6 +48,37 @@ logger = logging.getLogger(__name__)
 
 
 MIN_CONSUMPTION_L_PER_DAY = 0.01
+MIN_HEATING_L = 0.5
+MAX_HEATING_L = 15.0
+HDD_SCALE_MIN = 0.6
+HDD_SCALE_MAX = 1.6
+HEATING_BLEND_RECENT = 0.65
+HEATING_BLEND_LONG = 0.35
+LOOKBACK_MIN_DAYS = 30
+LOOKBACK_MAX_DAYS = 60
+DAYS_REMAINING_CAP_HDD = 400.0
+DAYS_REMAINING_CAP_NO_HDD = 700.0
+HW_BUFFER_FACTOR = 1.1
+HW_SESSIONS_PER_WEEK = 10  # 1/day × 4 weekdays + 2/day × 3 weekend days
+HW_SESSION_HOURS = 0.5
+
+
+# Real Nest heating-hours data (v1's get_seasonal_heating_factor).
+_HEATING_HOURS_BY_MONTH: dict[int, int] = {
+    1: 78,
+    2: 43,
+    3: 43,
+    4: 21,
+    5: 3,
+    6: 0,
+    7: 0,
+    8: 0,
+    9: 0,
+    10: 5,
+    11: 29,
+    12: 37,
+}
+_HEATING_MAX = max(_HEATING_HOURS_BY_MONTH.values())
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,6 +88,8 @@ class _Snapshot:
     ema_alpha: float
     kwh_per_liter: float
     co2_per_liter: float
+    fuel_rate_l_per_h: float
+    refill_threshold_l: float
 
 
 async def _snapshot(svc: SettingsService) -> _Snapshot:
@@ -52,16 +99,26 @@ async def _snapshot(svc: SettingsService) -> _Snapshot:
         ema_alpha=float(await svc.get("analysis.ema_alpha")),
         kwh_per_liter=float(await svc.get("analysis.kwh_per_liter")),
         co2_per_liter=float(await svc.get("analysis.co2_per_liter")),
+        fuel_rate_l_per_h=float(await svc.get("boiler.fuel_rate_l_per_h")),
+        refill_threshold_l=float(await svc.get("detection.refill_threshold_l")),
     )
 
 
+def _clamp(value: float, low: float, high: float) -> float:
+    return max(low, min(value, high))
+
+
 def _seasonal_heating_factor(month: int) -> float:
-    # Match v1's piecewise model: winter highest, summer lowest.
-    if month in {12, 1, 2}:
-        return 1.0
-    if month in {3, 4, 5, 9, 10, 11}:
-        return 0.7
-    return 0.3
+    """Proportion of peak heating usage for a given month, from real Nest data."""
+    if _HEATING_MAX <= 0:
+        return 0.0
+    return _HEATING_HOURS_BY_MONTH.get(month, 0) / _HEATING_MAX
+
+
+def _hot_water_baseline_l_per_day(fuel_rate_l_per_h: float) -> float:
+    """Estimate scheduled-HW daily consumption with v1's buffer."""
+    base = (HW_SESSIONS_PER_WEEK * HW_SESSION_HOURS * fuel_rate_l_per_h) / 7.0
+    return base * HW_BUFFER_FACTOR
 
 
 async def _latest_reading(sf: async_sessionmaker) -> Reading | None:
@@ -82,16 +139,8 @@ async def _earliest_reading(sf: async_sessionmaker) -> Reading | None:
         ).scalar_one_or_none()
 
 
-async def _latest_refill_anchor(
-    sf: async_sessionmaker,
-) -> Reading | None:
-    """Find the most recent refill marker across the entire DB.
-
-    v1's approach was the same — the refill row is the anchor for "since
-    last refill" totals. Limiting the query to the last N readings (as the
-    first port did) breaks once the most recent refill scrolls outside the
-    window, which is the common case after a few weeks of measurements.
-    """
+async def _latest_refill_anchor(sf: async_sessionmaker) -> Reading | None:
+    """Find the most recent refill marker across the entire DB."""
     async with sf() as session:
         return (
             await session.execute(
@@ -103,24 +152,178 @@ async def _latest_refill_anchor(
         ).scalar_one_or_none()
 
 
-def _days_between(later: datetime, earlier: datetime) -> float:
-    return max((later - earlier).total_seconds() / 86400.0, 0.0)
+async def _readings_in_window(
+    sf: async_sessionmaker, start_dt: datetime, end_dt: datetime
+) -> list[Reading]:
+    start = start_dt.strftime("%Y-%m-%d %H:%M:%S")
+    end = end_dt.strftime("%Y-%m-%d %H:%M:%S")
+    async with sf() as session:
+        return (
+            (
+                await session.execute(
+                    select(Reading)
+                    .where(Reading.date >= start, Reading.date <= end)
+                    .order_by(asc(Reading.date))
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+
+async def _hdd_in_window(
+    sf: async_sessionmaker, start_dt: datetime, end_dt: datetime
+) -> dict[str, float]:
+    """Return `{YYYY-MM-DD: hdd}` for every row in the window."""
+    start = start_dt.strftime("%Y-%m-%d")
+    end = end_dt.strftime("%Y-%m-%d")
+    async with sf() as session:
+        rows = (
+            (
+                await session.execute(
+                    select(HddDatum)
+                    .where(HddDatum.date >= start, HddDatum.date <= end)
+                    .order_by(asc(HddDatum.date))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return {r.date: float(r.hdd or 0) for r in rows}
+
+
+def _per_pair_total_consumption(
+    readings: list[Reading], refill_threshold_l: float
+) -> float:
+    """v1's calculate_total_consumption — ignore refills (large positive
+    jumps) and any pair where litres_remaining went up."""
+    total = 0.0
+    for prev, curr in zip(readings, readings[1:]):
+        used = float(prev.litres_remaining or 0) - float(curr.litres_remaining or 0)
+        if used < -refill_threshold_l:
+            continue
+        if used > 0:
+            total += used
+    return total
+
+
+def _usage_stats(
+    readings: list[Reading],
+    hdd_data: dict[str, float],
+    daily_hw_l: float,
+    refill_threshold_l: float,
+) -> dict[str, float]:
+    """v1's compute_usage_stats — splits HW-only days from heating days,
+    floors HW-only days to the HW baseline."""
+    total_days = 0.0
+    adjusted_total = 0.0
+    heating_total = 0.0
+    heat_day_count = 0.0
+
+    for prev, curr in zip(readings, readings[1:]):
+        used = float(prev.litres_remaining or 0) - float(curr.litres_remaining or 0)
+        if used < -refill_threshold_l:
+            continue
+        if used <= 0:
+            continue
+        prev_dt = parse_local(prev.date)
+        curr_dt = parse_local(curr.date)
+        if prev_dt is None or curr_dt is None:
+            continue
+        days_delta = (curr_dt - prev_dt).total_seconds() / 86400
+        if days_delta <= 0:
+            continue
+        per_day = used / days_delta
+        curr_day = curr_dt.strftime("%Y-%m-%d")
+        curr_hdd = hdd_data.get(curr_day, 0.0)
+
+        if curr_hdd == 0:
+            per_day = max(per_day, daily_hw_l)
+        else:
+            heat_day_count += days_delta
+
+        adjusted_total += per_day * days_delta
+        heating_component = max(per_day - daily_hw_l, 0.0) if curr_hdd > 0 else 0.0
+        heating_total += heating_component * days_delta
+        total_days += days_delta
+
+    return {
+        "total_days": total_days,
+        "adjusted_total": adjusted_total,
+        "heating_total": heating_total,
+        "heat_day_count": heat_day_count,
+    }
+
+
+async def _heating_estimate(
+    sf: async_sessionmaker,
+    *,
+    end_dt: datetime,
+    days: int,
+    daily_hw_l: float,
+    refill_threshold_l: float,
+) -> float | None:
+    """v1's compute_heating_usage — pure heating component (per-day)
+    averaged over days where HDD > 0."""
+    start_dt = end_dt - timedelta(days=days + 1)
+    readings = await _readings_in_window(sf, start_dt, end_dt)
+    if len(readings) < 2:
+        return None
+    hdd_data = await _hdd_in_window(sf, start_dt, end_dt)
+    stats = _usage_stats(readings, hdd_data, daily_hw_l, refill_threshold_l)
+    if stats["heat_day_count"] > 0:
+        return stats["heating_total"] / stats["heat_day_count"]
+    return None
+
+
+async def _smoothed_recent_daily(
+    sf: async_sessionmaker,
+    *,
+    end_dt: datetime,
+    days: int,
+    daily_hw_l: float,
+    refill_threshold_l: float,
+) -> float | None:
+    """v1's get_smoothed_daily_usage — per-pair daily averages, HW floor on 0-HDD days."""
+    start_dt = end_dt - timedelta(days=days + 1)
+    readings = await _readings_in_window(sf, start_dt, end_dt)
+    if len(readings) < 2:
+        return None
+    hdd_data = await _hdd_in_window(sf, start_dt, end_dt)
+    daily_usages: list[float] = []
+    for prev, curr in zip(readings, readings[1:]):
+        used = float(prev.litres_remaining or 0) - float(curr.litres_remaining or 0)
+        if used < -refill_threshold_l:
+            continue
+        if used < 0:
+            continue
+        prev_dt = parse_local(prev.date)
+        curr_dt = parse_local(curr.date)
+        if prev_dt is None or curr_dt is None:
+            continue
+        days_delta = (curr_dt - prev_dt).total_seconds() / 86400
+        if days_delta <= 0:
+            continue
+        per_day = used / days_delta
+        curr_day = curr_dt.strftime("%Y-%m-%d")
+        if hdd_data.get(curr_day, 0.0) == 0:
+            per_day = max(per_day, daily_hw_l)
+        daily_usages.append(per_day)
+    if not daily_usages:
+        return None
+    return sum(daily_usages) / len(daily_usages)
 
 
 async def compute(
     sf: async_sessionmaker, svc: SettingsService
 ) -> dict[str, Any] | None:
-    """Compute the analysis payload.
-
-    The window for `total_consumption_since_refill` is anchored to the most
-    recent refill marker in the entire `readings` table. If no refill has
-    ever been detected we fall back to the earliest stored reading and
-    return `days_since_refill=None` to signal "no anchor".
-    """
     latest = await _latest_reading(sf)
     earliest = await _earliest_reading(sf)
     if latest is None or earliest is None or latest.date == earliest.date:
         return None
+
+    snap = await _snapshot(svc)
+    daily_hw_l = _hot_water_baseline_l_per_day(snap.fuel_rate_l_per_h)
 
     latest_dt = parse_local(latest.date) or local_now()
     refill = await _latest_refill_anchor(sf)
@@ -132,49 +335,142 @@ async def compute(
         anchor_is_refill = False
 
     anchor_dt = parse_local(anchor.date) or latest_dt
-    days = _days_between(latest_dt, anchor_dt)
-    days_since_refill = int(days) if anchor_is_refill else None
+    days_since_anchor = max((latest_dt - anchor_dt).total_seconds() / 86400.0, 0.0)
+    days_since_refill = int(days_since_anchor) if anchor_is_refill else None
 
-    anchor_litres = float(anchor.litres_remaining or 0)
-    latest_litres = float(latest.litres_remaining or 0)
-    total_consumption = max(anchor_litres - latest_litres, 0.0)
-
-    avg_daily = (
-        total_consumption / days if days > 0 else MIN_CONSUMPTION_L_PER_DAY
+    # Total consumption since refill: simple anchor→latest delta (matches v1).
+    # The per-pair walker is only used inside the bounded look-back window
+    # below for `period_consumption` and the per-day adjusted average.
+    total_consumption = max(
+        float(anchor.litres_remaining or 0)
+        - float(latest.litres_remaining or 0),
+        0.0,
     )
-    avg_daily = max(avg_daily, MIN_CONSUMPTION_L_PER_DAY)
 
-    estimated_days_remaining = latest_litres / avg_daily
-
-    # HDD lookups: most recent month for upcoming_month_hdd; for
-    # consumption_per_hdd we want the cumulative HDD over the window.
-    async with sf() as session:
-        hdd_rows = (
-            await session.execute(
-                select(HddDatum).order_by(desc(HddDatum.date)).limit(24)
-            )
-        ).scalars().all()
-
-    upcoming_month_hdd = float(hdd_rows[0].hdd) if hdd_rows else 0.0
-    months_in_window = max(1, int(days // 30))
-    window_hdd_total = sum(
-        float(r.hdd or 0) for r in hdd_rows[:months_in_window]
+    # Bounded look-back for the windowed average — long post-refill windows
+    # otherwise let summer's near-zero usage poison the heating-season baseline.
+    if anchor_is_refill and days_since_anchor > 0:
+        lookback_days = min(
+            LOOKBACK_MAX_DAYS,
+            max(LOOKBACK_MIN_DAYS, int(days_since_anchor)),
+        )
+    else:
+        lookback_days = LOOKBACK_MIN_DAYS
+    analysis_start = max(anchor_dt, latest_dt - timedelta(days=lookback_days))
+    analysis_period_days = max(
+        (latest_dt - analysis_start).total_seconds() / 86400.0, 1.0
     )
+
+    window_readings = await _readings_in_window(sf, analysis_start, latest_dt)
+    window_hdd = await _hdd_in_window(sf, analysis_start, latest_dt)
+    window_consumption = _per_pair_total_consumption(
+        window_readings, snap.refill_threshold_l
+    )
+    if window_consumption <= 0 and total_consumption > 0:
+        window_consumption = total_consumption
+        analysis_period_days = max(days_since_anchor, 1.0)
+
+    stats = _usage_stats(window_readings, window_hdd, daily_hw_l, snap.refill_threshold_l)
+    if stats["total_days"] > 0:
+        adjusted_daily = stats["adjusted_total"] / stats["total_days"]
+    else:
+        adjusted_daily = (
+            max(window_consumption / analysis_period_days, daily_hw_l)
+            if analysis_period_days > 0
+            else daily_hw_l
+        )
+
+    # Recent-7-day smoothed daily, fallback to adjusted.
+    recent_daily = await _smoothed_recent_daily(
+        sf,
+        end_dt=latest_dt,
+        days=7,
+        daily_hw_l=daily_hw_l,
+        refill_threshold_l=snap.refill_threshold_l,
+    )
+    if recent_daily is None:
+        recent_daily = adjusted_daily
+
+    # HDD: cumulative for consumption-per-HDD; today and 7-day-avg for scaling.
+    cumulative_hdd_data = await _hdd_in_window(sf, anchor_dt, latest_dt)
+    total_hdd = sum(cumulative_hdd_data.values())
     consumption_per_hdd = (
-        total_consumption / window_hdd_total if window_hdd_total > 0 else 0.0
+        total_consumption / total_hdd if total_hdd > 0 else 0.0
     )
 
-    factor = _seasonal_heating_factor(latest_dt.month)
-    estimated_daily_heating = avg_daily * factor
-    estimated_daily_hot_water = avg_daily * (1 - factor) * 0.5
-    estimated_daily_consumption_hdd = (
-        estimated_daily_heating + estimated_daily_hot_water
+    today_str = latest_dt.strftime("%Y-%m-%d")
+    recent_hdd_data = await _hdd_in_window(
+        sf, latest_dt - timedelta(days=7), latest_dt
+    )
+    today_hdd = recent_hdd_data.get(today_str, 0.0)
+    avg_7d_hdd = (
+        sum(recent_hdd_data.values()) / len(recent_hdd_data)
+        if recent_hdd_data
+        else 0.0
     )
 
-    if avg_daily > 0:
+    # Upcoming month HDD (next month, same year unless December).
+    next_month = latest_dt.month + 1 if latest_dt.month < 12 else 1
+    next_year = latest_dt.year + 1 if latest_dt.month == 12 else latest_dt.year
+    next_month_key = f"{next_year:04d}-{next_month:02d}-01"
+    upcoming_month_hdd = cumulative_hdd_data.get(next_month_key, 0.0)
+    if upcoming_month_hdd == 0.0 and cumulative_hdd_data:
+        # Fallback: most recent HDD row.
+        upcoming_month_hdd = next(iter(reversed(cumulative_hdd_data.values())), 0.0)
+
+    factor = _seasonal_heating_factor(next_month)
+
+    # Heating estimate: blended 7d/long, scaled by today_HDD/avg_7d_HDD,
+    # clamped to [MIN_HEATING_L, MAX_HEATING_L]. Zero when today_HDD=0.
+    heating_7d = await _heating_estimate(
+        sf,
+        end_dt=latest_dt,
+        days=7,
+        daily_hw_l=daily_hw_l,
+        refill_threshold_l=snap.refill_threshold_l,
+    )
+    heating_long = await _heating_estimate(
+        sf,
+        end_dt=latest_dt,
+        days=lookback_days,
+        daily_hw_l=daily_hw_l,
+        refill_threshold_l=snap.refill_threshold_l,
+    )
+    if heating_7d is not None and heating_long is not None:
+        heating_estimate = (
+            heating_7d * HEATING_BLEND_RECENT
+            + heating_long * HEATING_BLEND_LONG
+        )
+    elif heating_7d is not None:
+        heating_estimate = heating_7d
+    elif heating_long is not None:
+        heating_estimate = heating_long
+    else:
+        heating_estimate = 0.0
+
+    surplus_l = max(recent_daily - daily_hw_l, 0.0)
+    heating_l = heating_estimate if heating_estimate > 0 else surplus_l
+    if today_hdd == 0:
+        heating_l = 0.0
+    elif heating_l > 0:
+        if avg_7d_hdd > 0:
+            scale = _clamp(today_hdd / avg_7d_hdd, HDD_SCALE_MIN, HDD_SCALE_MAX)
+            heating_l = heating_l * scale
+        heating_l = _clamp(heating_l, MIN_HEATING_L, MAX_HEATING_L)
+
+    estimated_daily_consumption_hdd = max(daily_hw_l + heating_l, daily_hw_l)
+    avg_daily_consumption_l = max(adjusted_daily, daily_hw_l)
+    avg_daily_consumption_l = max(avg_daily_consumption_l, MIN_CONSUMPTION_L_PER_DAY)
+
+    latest_litres = float(latest.litres_remaining or 0)
+    if avg_daily_consumption_l > 0:
+        raw_days_remaining = latest_litres / avg_daily_consumption_l
+        cap = DAYS_REMAINING_CAP_HDD if today_hdd > 0 else DAYS_REMAINING_CAP_NO_HDD
+        estimated_days_remaining = min(raw_days_remaining, cap)
         empty_dt = latest_dt + timedelta(days=estimated_days_remaining)
         empty_date = empty_dt.strftime("%Y-%m-%d %H:%M:%S")
     else:
+        estimated_days_remaining = 0.0
         empty_date = None
 
     payload: dict[str, Any] = {
@@ -184,15 +480,15 @@ async def compute(
         "latest_reading_leak_detected": latest.leak_detected,
         "days_since_refill": days_since_refill,
         "total_consumption_since_refill": round(total_consumption, 1),
-        "avg_daily_consumption_l": round(avg_daily, 2),
+        "avg_daily_consumption_l": round(avg_daily_consumption_l, 2),
         "estimated_days_remaining": round(estimated_days_remaining, 1),
         "estimated_empty_date": empty_date,
         "consumption_per_hdd_l": round(consumption_per_hdd, 4),
         "upcoming_month_hdd": round(upcoming_month_hdd, 2),
         "estimated_daily_consumption_hdd_l": round(estimated_daily_consumption_hdd, 2),
-        "estimated_daily_hot_water_consumption_l": round(estimated_daily_hot_water, 2),
-        "estimated_daily_heating_consumption_l": round(estimated_daily_heating, 2),
-        "seasonal_heating_factor": factor,
+        "estimated_daily_hot_water_consumption_l": round(daily_hw_l, 2),
+        "estimated_daily_heating_consumption_l": round(heating_l, 2),
+        "seasonal_heating_factor": round(factor, 3),
         "remaining_days_empty_hdd": round(estimated_days_remaining, 1),
         "remaining_date_empty_hdd": empty_date,
     }
