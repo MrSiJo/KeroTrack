@@ -3,6 +3,7 @@
   import * as echarts from "echarts";
 
   import BarChart from "$lib/components/BarChart.svelte";
+  import HeroCosts from "$lib/components/HeroCosts.svelte";
   import LineChart from "$lib/components/LineChart.svelte";
   import StatCard from "$lib/components/StatCard.svelte";
   import { KEROTRACK_DARK_THEME } from "$lib/charts/theme";
@@ -219,6 +220,8 @@
 </script>
 
 <div class="space-y-6">
+  <HeroCosts size="full" />
+
   <h1 class="text-lg font-semibold">Costs</h1>
 
   {#if error}
