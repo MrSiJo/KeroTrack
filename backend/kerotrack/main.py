@@ -33,7 +33,10 @@ from kerotrack.api.routes.stream import router as stream_router
 from kerotrack.bootstrap import get_bootstrap
 from kerotrack.db import init_engine, session_factory
 from kerotrack.db_migrate import ensure_schema
+from pathlib import Path
+
 from kerotrack.ingest.mqtt import MqttIngest
+from kerotrack.prices.service import PriceService
 from kerotrack.pubsub.bus import PubSubBus
 from kerotrack.scheduler.jobs import run_job
 from kerotrack.scheduler.service import SchedulerService
@@ -53,8 +56,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     pubsub = PubSubBus()
     feed = MqttFeedRing()
 
+    prices = PriceService(
+        settings_service=settings_service,
+        cache_path=Path("/app/data/price_cache.json"),
+    )
+
     mqtt = MqttIngest(
-        sf=sf, settings_service=settings_service, pubsub=pubsub, feed_ring=feed
+        sf=sf,
+        settings_service=settings_service,
+        pubsub=pubsub,
+        feed_ring=feed,
+        price_provider=prices.current_ppl,
     )
     settings_service.on_change("mqtt.*", mqtt.reconnect)
 
@@ -74,6 +86,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.mqtt = mqtt
     app.state.scheduler = scheduler
     app.state.mqtt_feed = feed
+    app.state.prices = prices
     app.state.secret_key = boot.app_secret_key
 
     await scheduler.start()
@@ -87,6 +100,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await asyncio.wait_for(mqtt_task, timeout=5.0)
         except asyncio.TimeoutError:
             mqtt_task.cancel()
+        await prices.aclose()
         await engine.dispose()
 
 

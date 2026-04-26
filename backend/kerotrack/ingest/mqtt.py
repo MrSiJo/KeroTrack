@@ -31,15 +31,29 @@ from kerotrack.pubsub.bus import PubSubBus
 logger = logging.getLogger(__name__)
 
 
-async def _load_previous(sf: async_sessionmaker) -> PreviousReading | None:
+async def _load_previous(
+    sf: async_sessionmaker, *, before_date: str | None = None
+) -> PreviousReading | None:
+    """Fetch the most recent reading strictly before `before_date`.
+
+    When ingest first lands a brand-new payload, `before_date` is the new
+    payload's timestamp; without this filter we would compare against rows
+    AT or AFTER that timestamp (e.g. duplicate upserts, or already-migrated
+    rows that share the same minute). That collapses
+    `litres_used_since_last` to 0 for every recurrence.
+    """
     async with sf() as session:
-        row = (
-            await session.execute(
+        stmt = select(
+            Reading.date, Reading.litres_remaining, Reading.air_gap_cm
+        ).order_by(desc(Reading.date)).limit(1)
+        if before_date is not None:
+            stmt = (
                 select(Reading.date, Reading.litres_remaining, Reading.air_gap_cm)
+                .where(Reading.date < before_date)
                 .order_by(desc(Reading.date))
                 .limit(1)
             )
-        ).first()
+        row = (await session.execute(stmt)).first()
     if row is None or row.litres_remaining is None or row.air_gap_cm is None:
         return None
     try:
@@ -114,18 +128,33 @@ async def handle_payload(
     publisher: MqttPublisher,
     pubsub: PubSubBus,
     ctx_override: RecalcContext | None = None,
+    price_provider=None,
 ) -> dict[str, Any]:
     """Process one inbound Watchman Sonic JSON and fan out the result.
 
-    Exposed at module level so unit tests can call it without spinning up an
-    aiomqtt client. Returns the processed payload for assertion.
+    `price_provider` is an awaitable returning the current pence-per-litre
+    (cached, with stale-fallback). Tests pass None and rely on
+    `ctx_override`.
     """
     payload = _normalise_payload(raw)
     if payload.get("model") not in {"Oil-SonicSmart", "Oil-SonicAdv"}:
         logger.debug("Ignoring non-Watchman payload: %s", payload.get("model"))
         return {}
-    ctx = ctx_override or await context_from_settings(settings_service)
-    previous = await _load_previous(sf)
+    if ctx_override is not None:
+        ctx = ctx_override
+    else:
+        ppl: float | None = None
+        if price_provider is not None:
+            try:
+                ppl = await price_provider()
+            except Exception:  # noqa: BLE001
+                logger.warning("price_provider failed", exc_info=True)
+        ctx = await context_from_settings(settings_service, current_ppl=ppl)
+
+    new_date = datetime.strptime(payload["time"], "%Y-%m-%d %H:%M:%S").strftime(
+        "%Y-%m-%d %H:%M:%S"
+    )
+    previous = await _load_previous(sf, before_date=new_date)
     processed = process(payload, ctx, previous=previous)
     await _persist_reading(sf, processed)
     await publisher.publish_level(processed)
@@ -171,11 +200,13 @@ class MqttIngest:
         settings_service,
         pubsub: PubSubBus,
         feed_ring=None,
+        price_provider=None,
     ) -> None:
         self._sf = sf
         self._settings = settings_service
         self._pubsub = pubsub
         self._feed = feed_ring
+        self._price_provider = price_provider
         self._stop = asyncio.Event()
         self._reload = asyncio.Event()
         self.connected = False
@@ -306,6 +337,7 @@ class MqttIngest:
                     settings_service=self._settings,
                     publisher=self.publisher,
                     pubsub=self._pubsub,
+                    price_provider=self._price_provider,
                 )
             except Exception:  # noqa: BLE001
                 logger.exception("error handling MQTT message")

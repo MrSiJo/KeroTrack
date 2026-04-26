@@ -213,11 +213,16 @@ def process(
     }
 
 
-async def context_from_settings(settings_service) -> RecalcContext:
+async def context_from_settings(
+    settings_service,
+    *,
+    current_ppl: float | None = None,
+) -> RecalcContext:
     """Build a `RecalcContext` from the live settings service.
 
-    Imported lazily to keep this module pure-Python (no settings import at
-    top — useful for unit tests that don't want a DB).
+    `current_ppl` is plumbed in from the price scraper; without it, cost_used
+    and cost_to_fill collapse to "0.00" exactly like the bug seen in the
+    first live reading.
     """
     g = settings_service.get
     return RecalcContext(
@@ -234,4 +239,5 @@ async def context_from_settings(settings_service) -> RecalcContext:
         refill_threshold_l=float(await g("detection.refill_threshold_l")),
         leak_threshold_l=float(await g("detection.leak_threshold_l")),
         leak_rate_per_day_l=float(await g("detection.leak_rate_per_day_l")),
+        current_ppl=current_ppl,
     )
