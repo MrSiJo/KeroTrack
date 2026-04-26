@@ -44,6 +44,8 @@
     }
   }
 
+  const HIDDEN_KEYS = new Set<string>(["web.title"]);
+
   const GROUP_ORDER: Record<string, string[]> = {
     mqtt: [
       "mqtt.broker",
@@ -71,15 +73,20 @@
   let visibleItems = $derived(() => {
     const q = $search.trim().toLowerCase();
     if (q) {
-      return $settings.items.filter(
-        (i) =>
-          i.key.toLowerCase().includes(q) ||
-          (i.label ?? "").toLowerCase().includes(q),
-      );
+      return $settings.items
+        .filter((i) => !HIDDEN_KEYS.has(i.key))
+        .filter(
+          (i) =>
+            i.key.toLowerCase().includes(q) ||
+            (i.label ?? "").toLowerCase().includes(q),
+        );
     }
     if ($activeGroup === "account") return [];
     if ($activeGroup === "maintenance") return [];
-    return applyOrder($settings.groups[$activeGroup] ?? [], $activeGroup);
+    return applyOrder(
+      ($settings.groups[$activeGroup] ?? []).filter((i) => !HIDDEN_KEYS.has(i.key)),
+      $activeGroup,
+    );
   });
 
   async function changePassword(e: Event) {
@@ -178,7 +185,17 @@
             <div class="font-mono text-[10px] text-text-subtle opacity-0 transition-opacity group-focus-within:opacity-100 group-hover:opacity-100">{item.key}</div>
           </label>
           <div class="col-span-7">
-            {#if item.value_type === "bool"}
+            {#if item.key === "web.theme_default"}
+              <select
+                class="w-32 rounded border border-border bg-bg-elev px-2 py-1 text-xs"
+                value={display(item) as string}
+                onchange={(e) => onChange(item.key, (e.currentTarget as HTMLSelectElement).value)}
+              >
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+                <option value="system">System (auto)</option>
+              </select>
+            {:else if item.value_type === "bool"}
               <input
                 type="checkbox"
                 checked={display(item) as boolean}
