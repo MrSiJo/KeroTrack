@@ -16,14 +16,14 @@
       error = "Passwords don't match";
       return;
     }
-    if (password.length < 8) {
-      error = "Password must be at least 8 characters";
+    if (password.length < 12) {
+      error = "Password must be at least 12 characters";
       return;
     }
     submitting = true;
     try {
       await auth.setup(username, password);
-      goto("/");
+      goto("/onboarding");
     } catch (err) {
       error = err instanceof ApiError ? err.message : (err as Error).message;
     } finally {

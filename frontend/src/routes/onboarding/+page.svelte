@@ -8,68 +8,85 @@
 
   let step = $state(1);
   let saving = $state(false);
+  let loaded = $state(false);
   let error = $state<string | null>(null);
 
-  // Step 1 — MQTT
-  let mqttBroker = $state("localhost");
+  // Pre-filled from the live settings snapshot in onMount so the wizard
+  // never drifts from the catalogue defaults in backend/.../schema.py.
+  // Initial values are placeholders only and never reach the API — Save
+  // is gated on `loaded`.
+  let mqttBroker = $state("");
   let mqttPort = $state(1883);
   let mqttUsername = $state("");
   let mqttPassword = $state("");
-  let mqttTopicReadings = $state("oiltank/readings");
-  let mqttTopicAnalytics = $state("oiltank/analytics");
+  let mqttTopicReadings = $state("");
+  let mqttTopicAnalytics = $state("");
 
-  // Step 2 — Tank
-  let tankCapacity = $state(1225);
-  let tankLength = $state(178.5);
-  let tankWidth = $state(75);
-  let tankHeight = $state(137);
+  let tankCapacity = $state(0);
+  let tankLength = $state(0);
+  let tankWidth = $state(0);
+  let tankHeight = $state(0);
 
-  // Step 3 — Boiler (all optional)
   let boilerModel = $state("");
   let boilerBurner = $state("");
-  let boilerNozzle = $state(0.6);
-  let boilerInputKw = $state(22.1);
-  let boilerOutputKw = $state(21.5);
-  let boilerEfficiency = $state(99);
+  let boilerNozzle = $state(0);
+  let boilerInputKw = $state(0);
+  let boilerOutputKw = $state(0);
+  let boilerEfficiency = $state(0);
 
-  // Pre-fill from current settings if any are already non-default
+  // Snapshot of values at load time, used to send only changed keys.
+  let initial: Record<string, unknown> = {};
+
   onMount(async () => {
     await settings.refresh();
     const snapshot = get(settings);
-    const get_ = (k: string) => snapshot.items.find((i) => i.key === k)?.value;
+    const lookup = (k: string) =>
+      snapshot.items.find((i) => i.key === k)?.value;
+    const str = (k: string, fallback = "") => {
+      const v = lookup(k);
+      return v == null ? fallback : String(v);
+    };
+    const num = (k: string, fallback = 0) => {
+      const v = lookup(k);
+      return typeof v === "number" ? v : fallback;
+    };
 
-    const b = get_("mqtt.broker");
-    if (b && b !== "localhost") mqttBroker = String(b);
-    const p = get_("mqtt.port");
-    if (typeof p === "number") mqttPort = p;
-    const u = get_("mqtt.username");
-    if (u) mqttUsername = String(u);
-    const tr = get_("mqtt.topic_readings");
-    if (tr) mqttTopicReadings = String(tr);
-    const ta = get_("mqtt.topic_analytics");
-    if (ta) mqttTopicAnalytics = String(ta);
+    mqttBroker = str("mqtt.broker", "localhost");
+    mqttPort = num("mqtt.port", 1883);
+    mqttUsername = str("mqtt.username");
+    mqttTopicReadings = str("mqtt.topic_readings");
+    mqttTopicAnalytics = str("mqtt.topic_analytics");
 
-    const cap = get_("tank.capacity_l");
-    if (typeof cap === "number") tankCapacity = cap;
-    const len = get_("tank.length_cm");
-    if (typeof len === "number") tankLength = len;
-    const wid = get_("tank.width_cm");
-    if (typeof wid === "number") tankWidth = wid;
-    const hei = get_("tank.height_cm");
-    if (typeof hei === "number") tankHeight = hei;
+    tankCapacity = num("tank.capacity_l");
+    tankLength = num("tank.length_cm");
+    tankWidth = num("tank.width_cm");
+    tankHeight = num("tank.height_cm");
 
-    const bm = get_("boiler.model");
-    if (bm) boilerModel = String(bm);
-    const bb = get_("boiler.burner");
-    if (bb) boilerBurner = String(bb);
-    const bn = get_("boiler.nozzle");
-    if (typeof bn === "number") boilerNozzle = bn;
-    const bi = get_("boiler.input_kw");
-    if (typeof bi === "number") boilerInputKw = bi;
-    const bo = get_("boiler.output_kw");
-    if (typeof bo === "number") boilerOutputKw = bo;
-    const be = get_("boiler.efficiency_pct");
-    if (typeof be === "number") boilerEfficiency = be;
+    boilerModel = str("boiler.model");
+    boilerBurner = str("boiler.burner");
+    boilerNozzle = num("boiler.nozzle");
+    boilerInputKw = num("boiler.input_kw");
+    boilerOutputKw = num("boiler.output_kw");
+    boilerEfficiency = num("boiler.efficiency_pct");
+
+    initial = {
+      "mqtt.broker": mqttBroker,
+      "mqtt.port": mqttPort,
+      "mqtt.username": mqttUsername,
+      "mqtt.topic_readings": mqttTopicReadings,
+      "mqtt.topic_analytics": mqttTopicAnalytics,
+      "tank.capacity_l": tankCapacity,
+      "tank.length_cm": tankLength,
+      "tank.width_cm": tankWidth,
+      "tank.height_cm": tankHeight,
+      "boiler.model": boilerModel,
+      "boiler.burner": boilerBurner,
+      "boiler.nozzle": boilerNozzle,
+      "boiler.input_kw": boilerInputKw,
+      "boiler.output_kw": boilerOutputKw,
+      "boiler.efficiency_pct": boilerEfficiency,
+    };
+    loaded = true;
   });
 
   function next() {
@@ -89,7 +106,7 @@
   async function finish() {
     saving = true;
     error = null;
-    const diff: Record<string, unknown> = {
+    const current: Record<string, unknown> = {
       "mqtt.broker": mqttBroker,
       "mqtt.port": mqttPort,
       "mqtt.username": mqttUsername,
@@ -106,9 +123,15 @@
       "boiler.output_kw": boilerOutputKw,
       "boiler.efficiency_pct": boilerEfficiency,
     };
+    const diff: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(current)) {
+      if (value !== initial[key]) diff[key] = value;
+    }
     if (mqttPassword) diff["mqtt.password"] = mqttPassword;
     try {
-      await api.bulkSetSettings(diff);
+      if (Object.keys(diff).length > 0) {
+        await api.bulkSetSettings(diff);
+      }
       if (typeof localStorage !== "undefined") {
         localStorage.setItem("kerotrack.onboarding.dismissed", "1");
       }
@@ -258,9 +281,9 @@
           type="button"
           class="rounded bg-brand-blue px-4 py-1.5 text-xs font-medium text-white disabled:opacity-50"
           onclick={finish}
-          disabled={saving}
+          disabled={saving || !loaded}
         >
-          {saving ? "Saving…" : "Save & finish"}
+          {saving ? "Saving…" : !loaded ? "Loading…" : "Save & finish"}
         </button>
       {/if}
     </footer>
