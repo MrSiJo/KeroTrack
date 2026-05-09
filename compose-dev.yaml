@@ -1,0 +1,43 @@
+# KeroTrack v2 development compose — builds both images locally from
+# the source checkout. Use this when you have the repo cloned and want
+# to iterate on backend or frontend code.
+#
+# Usage:
+#   docker compose -f compose-dev.yaml up --build
+#
+# For production deploys, use `compose.yaml` instead — it pulls
+# pre-built images from GHCR and needs no source checkout on the host.
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: kerotrack-api
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "${BACKEND_PORT:-9176}:9176"
+    volumes:
+      - /dockerdata/kerotrack/data:/app/data
+      - /dockerdata/kerotrack/logs:/app/logs
+    networks:
+      - kerotrack-net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: kerotrack-ui
+    restart: unless-stopped
+    ports:
+      - "${FRONTEND_PORT:-9177}:80"
+    depends_on:
+      - backend
+    networks:
+      - kerotrack-net
+
+networks:
+  kerotrack-net:
+    driver: bridge

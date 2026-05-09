@@ -1,34 +1,83 @@
+# KeroTrack v2 production compose — pulls pre-built images from the
+# GitHub Container Registry instead of building locally.
+#
+# This is the file `docker compose up -d` will pick up by default.
+# Use `compose-dev.yaml` instead if you have the source checked out
+# and want to build images locally:
+#   docker compose -f compose-dev.yaml up --build
+#
+# Usage:
+#   1. Create a `.env` next to this file with at least:
+#        APP_SECRET_KEY=<a-strong-random-secret-of-32+-chars>
+#      Generate one:
+#        python -c "import secrets; print(secrets.token_urlsafe(48))"
+#
+#   2. (Optional) Pin a specific image tag — defaults to `latest`:
+#        export KEROTRACK_TAG=v0.1.0
+#      or set `KEROTRACK_TAG=v0.1.0` in `.env`.
+#
+#   3. docker compose pull
+#      docker compose up -d
+#
+# Data lives in the Docker-managed named volumes `kerotrack-data` and
+# `kerotrack-logs`. To bind to host paths instead, drop a
+# `compose.override.yaml` next to this file — see
+# `compose.override.yaml.example` for two patterns.
+
 services:
   backend:
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
+    image: ghcr.io/mrsijo/kerotrack-api:${KEROTRACK_TAG:-latest}
     container_name: kerotrack-api
+    pull_policy: always
     restart: unless-stopped
     env_file:
       - .env
     ports:
       - "${BACKEND_PORT:-9176}:9176"
     volumes:
-      - /dockerdata/kerotrack/data:/app/data
-      - /dockerdata/kerotrack/logs:/app/logs
+      - kerotrack-data:/app/data
+      - kerotrack-logs:/app/logs
     networks:
       - kerotrack-net
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -fsS
+        - http://localhost:9176/api/health
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        VITE_API_URL: ${VITE_API_URL:-http://localhost:9176}
+    image: ghcr.io/mrsijo/kerotrack-ui:${KEROTRACK_TAG:-latest}
     container_name: kerotrack-ui
+    pull_policy: always
     restart: unless-stopped
     ports:
       - "${FRONTEND_PORT:-9177}:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     networks:
       - kerotrack-net
+    healthcheck:
+      test:
+        - CMD
+        - wget
+        - --quiet
+        - --tries=1
+        - --spider
+        - http://localhost/
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  kerotrack-data:
+  kerotrack-logs:
 
 networks:
   kerotrack-net:

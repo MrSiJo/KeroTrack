@@ -1,0 +1,43 @@
+# Automated semantic-versioned releases driven by Conventional Commits.
+#
+# Flow:
+#   1. Every push to `main` runs release-please-action, which inspects
+#      commit messages since the last release tag and either creates or
+#      updates a `chore(main): release X.Y.Z` PR.
+#   2. When you merge that Release PR, release-please cuts a git tag
+#      (`vX.Y.Z`), publishes a GitHub Release with auto-generated
+#      changelog, and writes both into the manifest file.
+#   3. The new tag triggers `build-images.yml`, which publishes the
+#      versioned amd64 images to GHCR (:vX.Y.Z, :X.Y, :X, :latest).
+#
+# Conventional commit → version bump:
+#   feat:      → minor
+#   fix:       → patch
+#   feat!:     → major (or any commit with `BREAKING CHANGE:` footer)
+#   chore:, docs:, ci:, refactor:, test:, build:, perf:, style:
+#              → no bump (still listed in the changelog)
+
+name: Release please
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run release-please
+        uses: googleapis/release-please-action@v5
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

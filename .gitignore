@@ -41,6 +41,9 @@ price_cache.json
 .worktrees/
 .superpowers/
 
+# Local docker-compose override (deploy-host bind mounts, etc.)
+compose.override.yaml
+
 # v1 → v2 migration source (developer's local copy of the production DB; never committed)
 legacy/
 

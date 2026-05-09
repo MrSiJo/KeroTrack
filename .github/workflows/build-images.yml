@@ -1,0 +1,102 @@
+# Build and publish KeroTrack v2 container images to GitHub Container Registry.
+#
+# Triggers:
+#   - Push to `main`            → :latest and :sha-<short>
+#   - Tag matching `v*.*.*`     → :vX.Y.Z, :X.Y, :X, :latest (release builds)
+#   - Pull requests             → build only, no push (verifies Dockerfiles)
+#   - Manual dispatch           → tags depend on the ref it runs against
+#
+# Versioned tags come from this workflow's tag trigger; release-please
+# creates the tag, and this workflow reacts to its push.
+#
+# linux/amd64 only (no QEMU). Cache via GitHub Actions cache, scoped per
+# image.
+#
+# After the first successful run, set both packages to public under
+# https://github.com/MrSiJo?tab=packages so downstream users can pull
+# anonymously.
+
+name: Build container images
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+    paths-ignore:
+      - '**/*.md'
+      - LICENSE
+      - .gitignore
+      - .pre-commit-config.yaml
+      - .release-please-manifest.json
+      - release-please-config.json
+  pull_request:
+    branches: [main]
+    paths:
+      - backend/**
+      - frontend/**
+      - .github/workflows/build-images.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build ${{ matrix.image.name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        image:
+          - name: kerotrack-api
+            context: ./backend
+            dockerfile: ./backend/Dockerfile
+          - name: kerotrack-ui
+            context: ./frontend
+            dockerfile: ./frontend/Dockerfile
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository_owner }}/${{ matrix.image.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable=${{ github.ref == format('refs/heads/{0}', github.event.repository.default_branch) }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.image.context }}
+          file: ${{ matrix.image.dockerfile }}
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=${{ matrix.image.name }}
+          cache-to: type=gha,scope=${{ matrix.image.name }},mode=max
+          provenance: false

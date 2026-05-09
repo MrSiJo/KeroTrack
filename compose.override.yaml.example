@@ -1,0 +1,27 @@
+# Local override for the deploy host. Copy to `compose.override.yaml`
+# (which is gitignored) and adapt to your host paths. Docker Compose
+# automatically merges this on top of `compose.yaml`.
+#
+# Two patterns — pick one and delete the other:
+#
+# (A) Re-bind the named volumes to host paths. Volume names in
+#     `compose.yaml` stay stable; data lives at the host path.
+volumes:
+  kerotrack-data:
+    driver_opts:
+      type: none
+      device: /dockerdata/kerotrack/data
+      o: bind
+  kerotrack-logs:
+    driver_opts:
+      type: none
+      device: /dockerdata/kerotrack/logs
+      o: bind
+
+# (B) Or replace the volume mounts directly on the service. Uncomment
+#     this block AND remove the `volumes:` block above:
+# services:
+#   backend:
+#     volumes:
+#       - /dockerdata/kerotrack/data:/app/data
+#       - /dockerdata/kerotrack/logs:/app/logs
