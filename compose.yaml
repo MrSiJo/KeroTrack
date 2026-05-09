@@ -10,8 +10,8 @@ services:
     ports:
       - "${BACKEND_PORT:-9176}:9176"
     volumes:
-      - kerotrack-data:/app/data
-      - kerotrack-logs:/app/logs
+      - /dockerdata/kerotrack/data:/app/data
+      - /dockerdata/kerotrack/logs:/app/logs
     networks:
       - kerotrack-net
 
@@ -29,10 +29,6 @@ services:
       - backend
     networks:
       - kerotrack-net
-
-volumes:
-  kerotrack-data:
-  kerotrack-logs:
 
 networks:
   kerotrack-net:

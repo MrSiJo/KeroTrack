@@ -4,11 +4,19 @@
 **Status:** Approved for execution
 **Spec:** [`2026-04-25-v2-redesign.md`](./2026-04-25-v2-redesign.md) — read first
 **Design language:** [`ADR-0004`](../adr/0004-frontend-design-language.md)
-**Auth pattern:** [`ADR-0005`](../adr/0005-auth-pattern.md) — single-user, JobTrack-style
+**Auth pattern:** [`ADR-0005`](../adr/0005-auth-pattern.md) — single-user, session-cookie
 
 **Phases:** 0 → 1 → 2 → **2.5 (auth)** → 3 → 4 → 5 → 6 → 7 → 8. Phase 2.5 (single-user
-JobTrack-style auth) is added per the operator's request for parity with the sibling
-projects and supersedes the original spec's "no auth in v2.0" stance.
+session-cookie auth) is added per the operator's request and supersedes
+the original spec's "no auth in v2.0" stance.
+
+> **Address placeholders.** Hosts are written as `<v1-host>`,
+> `<docker-host>`, `<mqtt-broker>` etc. **These are placeholders —
+> substitute the real hostnames or IPs of your own environment.** They
+> vary by deployment; the v2 runtime makes no assumption about any
+> particular subnet. All operational settings (broker host, scrape URLs,
+> notifier endpoints) are stored in the `settings` table in the
+> database, not the codebase.
 
 ---
 
@@ -52,7 +60,7 @@ git push
 docker compose --env-file .env up -d --build
 
 # 4. Verify
-curl -fsS http://172.16.0.83:9176/api/health
+curl -fsS http://<docker-host>:9176/api/health
 # (and any phase-specific verification step listed in the phase exit criteria)
 ```
 
@@ -60,11 +68,11 @@ If a deploy goes sideways: `git revert HEAD && git push && docker compose --env-
 
 ### What the MVP is
 
-**Feature parity with v1**, end-to-end, on the SvelteKit frontend, configured via the DB-backed settings, with the v1 SQLite DB migrated cleanly. Plus **single-user login** (ADR-0005) so the deployment matches JobTrack and FinTrack. That bar is what each phase contributes to. New behaviour beyond parity (forecast fan, calendar heatmap, scheduler reload-on-settings-change, audit log, SSE, login/setup) is in scope because it's already designed; **multi-tank, multi-user/role auth, API tokens, TLS, Postgres, and encrypted secrets are not.**
+**Feature parity with v1**, end-to-end, on the SvelteKit frontend, configured via the DB-backed settings, with the v1 SQLite DB migrated cleanly. Plus **single-user login** (ADR-0005). That bar is what each phase contributes to. New behaviour beyond parity (forecast fan, calendar heatmap, scheduler reload-on-settings-change, audit log, SSE, login/setup) is in scope because it's already designed; **multi-tank, multi-user/role auth, API tokens, TLS, Postgres, and encrypted secrets are not.**
 
 ### Source of truth for the v1 port
 
-The local v1 repo at `C:/code/KeroTrack` is the canonical source for the port. The deployed v1 at `root@172.16.0.14:/opt/KeroTrack/` lags behind it (verified 2026-04-25 — 4 of 5 core files differ). Phase 3 ports come from the local repo; the deployed system is only used as a *data source* (its SQLite DB and YAML config) and as the *cutover target* (it gets replaced).
+The local v1 repo at `C:/code/KeroTrack` is the canonical source for the port. The deployed v1 at `root@<v1-host>:/opt/KeroTrack/` lags behind it (verified 2026-04-25 — 4 of 5 core files differ). Phase 3 ports come from the local repo; the deployed system is only used as a *data source* (its SQLite DB and YAML config) and as the *cutover target* (it gets replaced).
 
 ### Open decision: SQLite provision
 
@@ -130,8 +138,8 @@ pytest.ini
 - `pytest backend/tests -q` → 1 passed.
 - `npm --prefix frontend run build` → succeeds.
 - `docker compose --env-file .env up -d --build` from the dev workstation against the docker-host context → both containers healthy.
-- `curl http://172.16.0.83:9176/api/health` → `{"status":"scaffold"}`.
-- `curl http://172.16.0.83:9177` → SvelteKit placeholder page.
+- `curl http://<docker-host>:9176/api/health` → `{"status":"scaffold"}`.
+- `curl http://<docker-host>:9177` → SvelteKit placeholder page.
 
 ### Commit
 
@@ -183,8 +191,8 @@ backend/tests/api/test_settings_api.py
 ### Exit criteria
 
 - All tests green.
-- `curl -X GET http://172.16.0.83:9176/api/settings/schema` returns the full catalogue.
-- `curl -X PUT http://172.16.0.83:9176/api/settings/tank.capacity_l -d '{"value": 1500}'` updates and reads back as 1500.
+- `curl -X GET http://<docker-host>:9176/api/settings/schema` returns the full catalogue.
+- `curl -X PUT http://<docker-host>:9176/api/settings/tank.capacity_l -d '{"value": 1500}'` updates and reads back as 1500.
 - A secret key (`mqtt.password`) returns `********` on read but stores correctly when `PUT`.
 
 ### Commit
@@ -238,7 +246,7 @@ backend/tests/api/test_health.py
 
 ---
 
-## Phase 2.5 — Auth foundation (single-user, JobTrack pattern)
+## Phase 2.5 — Auth foundation (single-user, session-cookie)
 
 **Status:** Pending
 **Mode:** Sequential · single agent
@@ -249,7 +257,7 @@ backend/tests/api/test_health.py
 
 ### Objective
 
-Drop in JobTrack's auth pattern verbatim: argon2id password hashing, Starlette
+Wire in the session-cookie auth pattern: argon2id password hashing, Starlette
 `SessionMiddleware`, custom `RequireAuthMiddleware` and `CSRFMiddleware`, first-time
 setup flow, login/logout/me routes. Single-user — the service refuses to create a
 second user. No password churn pollutes `setting_changes`; credentials live in their
@@ -266,7 +274,7 @@ backend/kerotrack/api/csrf.py                   # CSRFMiddleware + generate_csrf
 backend/kerotrack/api/routes/auth.py            # /api/setup/status, /api/setup, /api/auth/{login,logout,me,change-password}
 backend/kerotrack/services/auth_service.py      # bootstrap_user, get_user, is_setup_complete, change_password
 backend/kerotrack/db_migrate.py                 # add `users` table (idempotent)
-backend/kerotrack/bootstrap.py                  # add APP_SECRET_KEY validator (mirrors JobTrack guardrails)
+backend/kerotrack/bootstrap.py                  # add APP_SECRET_KEY validator (placeholder + length checks)
 backend/kerotrack/main.py                       # wire SessionMiddleware → RequireAuth → CSRF
 backend/pyproject.toml                          # + argon2-cffi, itsdangerous (transitive), cryptography
 backend/tests/unit/test_crypto.py
@@ -309,7 +317,7 @@ backend/tests/api/test_csrf_middleware.py
 1. `users` model and idempotent table creation in `db_migrate`.
 2. `security/crypto.py` (4 tiny functions).
 3. `services/auth_service.py` — single-user bootstrap, `verify_password` lookup.
-4. `bootstrap.py` — add `APP_SECRET_KEY` field with the JobTrack validators.
+4. `bootstrap.py` — add `APP_SECRET_KEY` field with placeholder + length validators.
 5. Middlewares (`auth_middleware.py`, `csrf.py`) — straight ports.
 6. Routes (`api/routes/auth.py`).
 7. Wire into `main.py` lifespan in the load-bearing order documented in spec §6.6.
@@ -491,7 +499,7 @@ backend/tests/api/test_*.py                       # one per route module
 
 - All tests green.
 - On the host: every documented endpoint reachable via `curl`.
-- Live SSE: `curl -N http://172.16.0.83:9176/api/stream` streams events as MQTT messages arrive.
+- Live SSE: `curl -N http://<docker-host>:9176/api/stream` streams events as MQTT messages arrive.
 
 ### Commit
 
@@ -569,14 +577,13 @@ Then run `python scripts/build-fixture.py` once to generate `backend/tests/fixtu
 `kerotrack-dark` ECharts theme once at app boot. `lib/api.ts` is a typed fetch client
 matching Phase 5 routes — sends `credentials: "include"`, attaches `X-CSRF-Token` for
 mutating verbs, and calls a registered `onUnauthorised` callback on 401.
-`lib/stores/{auth,liveStatus,settings,theme}.ts` per spec §7.2 — `auth.ts` mirrors
-JobTrack's `AuthProvider` (boot calls `/api/setup/status`, then `/api/auth/me` if setup;
+`lib/stores/{auth,liveStatus,settings,theme}.ts` per spec §7.2 — `auth.ts`
+orchestrates the auth state (boot calls `/api/setup/status`, then `/api/auth/me` if setup;
 exposes `user`, `needsSetup`, `csrfToken`, `login`, `logout`, `refresh`).
 `routes/+layout.svelte` is the auth guard: while loading shows a spinner, if
 `needsSetup` redirects to `/setup`, if no `user` redirects to `/login`, else renders the
 chrome (sidebar, header, theme toggle). `routes/login/+page.svelte` and
-`routes/setup/+page.svelte` follow the JobTrack visual cues but in the
-ADR-0004 palette. `Sidebar.svelte`, `KeyboardHints.svelte`, `ThemeToggle.svelte`. SSE
+`routes/setup/+page.svelte` use the ADR-0004 palette. `Sidebar.svelte`, `KeyboardHints.svelte`, `ThemeToggle.svelte`. SSE
 wiring via `EventSource` against `/api/stream`. **No analytics/dashboard content yet**
 — only chrome, login/setup, and the empty page shells with route stubs.
 
@@ -643,8 +650,8 @@ Two waves, dispatched together in one message each. Each agent owns exactly its 
 
 ### What "ready for cutover" means in this plan
 
-Phases 0–7 land an **empty-DB v2 deployment** with the JobTrack-style login flow on the
-docker host. The operator can hit `http://172.16.0.83:9177`, complete the first-time
+Phases 0–7 land an **empty-DB v2 deployment** with the session-cookie login flow on the
+docker host. The operator can hit `http://<docker-host>:9177`, complete the first-time
 `/setup`, log in, see all pages render against the empty DB, and confirm the auth flow
 end-to-end. **No automated ingest happens** until the operator changes
 `mqtt.broker` from `localhost` to the real broker via the Settings page (or until
@@ -652,7 +659,7 @@ cutover migrates the v1 settings).
 
 This phase is the operator-driven follow-up:
 
-1. Operator stops the v1 LXC (`172.16.0.14`).
+1. Operator stops the v1 LXC (`<v1-host>`).
 2. Operator runs the steps below to populate v2 with the snapshot.
 
 The implementation agent does **not** stop the LXC, run the migration, or decommission v1
@@ -666,20 +673,20 @@ Production cutover from v1 → v2 with rollback rehearsed.
 
 ### Hosts (verified 2026-04-25)
 
-- **v1 LXC**: `root@172.16.0.14`, hostname `KeroTrack`. Runs `KeroTrack-MQTT.service` and `KeroTrack-Web.service` as system user `KeroTrack`. Cron entries: `/etc/cron.d/KeroTrack-Notifier` (Sun 08:00), `/etc/cron.weekly/KeroTrack-Analysis`, `/etc/cron.monthly/KeroTrack-CostAnalysis`.
-- **Docker host**: `root@172.16.0.83`. Runs v2 via `docker context use docker-host`.
-- **MQTT broker** (shared): `172.16.0.32:1883`.
+- **v1 LXC**: `root@<v1-host>`, hostname `KeroTrack`. Runs `KeroTrack-MQTT.service` and `KeroTrack-Web.service` as system user `KeroTrack`. Cron entries: `/etc/cron.d/KeroTrack-Notifier` (Sun 08:00), `/etc/cron.weekly/KeroTrack-Analysis`, `/etc/cron.monthly/KeroTrack-CostAnalysis`.
+- **Docker host**: `root@<docker-host>`. Runs v2 via `docker context use docker-host`.
+- **MQTT broker** (shared): `<mqtt-broker>:1883`.
 
 ### Steps
 
 1. **Rehearsal in dev.** With `legacy/` populated, run a full migration into a fresh container, hit every page in the dashboard, confirm KeroTrack-display still updates against the dev broker. Document any sharp edges.
 2. **Snapshot v1 on the production host.**
    ```bash
-   ssh root@172.16.0.14 "tar czf /root/kerotrack-v1-$(date +%F).tgz /opt/KeroTrack/data /opt/KeroTrack/config"
-   scp root@172.16.0.14:/root/kerotrack-v1-*.tgz root@172.16.0.83:/root/
-   ssh root@172.16.0.83 "mkdir -p /root/v1-snapshot && tar xzf /root/kerotrack-v1-*.tgz --strip-components=2 -C /root/v1-snapshot"
+   ssh root@<v1-host> "tar czf /root/kerotrack-v1-$(date +%F).tgz /opt/KeroTrack/data /opt/KeroTrack/config"
+   scp root@<v1-host>:/root/kerotrack-v1-*.tgz root@<docker-host>:/root/
+   ssh root@<docker-host> "mkdir -p /root/v1-snapshot && tar xzf /root/kerotrack-v1-*.tgz --strip-components=2 -C /root/v1-snapshot"
    ```
-3. **Stop v1.** `ssh root@172.16.0.14 "systemctl stop KeroTrack-Web KeroTrack-MQTT"`. Disable the cron entries: `ssh root@172.16.0.14 "rm /etc/cron.d/KeroTrack-Notifier /etc/cron.weekly/KeroTrack-Analysis /etc/cron.monthly/KeroTrack-CostAnalysis"`.
+3. **Stop v1.** `ssh root@<v1-host> "systemctl stop KeroTrack-Web KeroTrack-MQTT"`. Disable the cron entries: `ssh root@<v1-host> "rm /etc/cron.d/KeroTrack-Notifier /etc/cron.weekly/KeroTrack-Analysis /etc/cron.monthly/KeroTrack-CostAnalysis"`.
 4. **Migrate.** From the dev workstation with the docker-host context active:
    ```bash
    docker compose run --rm \
@@ -692,17 +699,17 @@ Production cutover from v1 → v2 with rollback rehearsed.
 5. **Inspect the report.** Sanity-check row counts (expect ~17 k readings, ~6.7 k analysis_results, 9 refill_periods, 0 actual_refill_costs as of last snapshot), "defaulted", and "ignored" lists.
 6. **Bring up v2.** `docker compose --env-file .env up -d --build`.
 7. **Verify.** `/api/health` shows `mqtt_connected: true` within one broadcast interval; trigger `POST /api/admin/jobs/notifier/run` with `{"test": true}` and confirm the Gotify notification arrives; visit each page and sanity-check; confirm KeroTrack-display still updates.
-8. **Decommission.** On `172.16.0.14`: `systemctl disable --now KeroTrack-Web KeroTrack-MQTT`, `rm /etc/systemd/system/KeroTrack-{Web,MQTT}.service`, `rm -rf /opt/KeroTrack`, `userdel KeroTrack`. Keep the snapshot tarball for 30 days. Optionally power off the LXC.
+8. **Decommission.** On `<v1-host>`: `systemctl disable --now KeroTrack-Web KeroTrack-MQTT`, `rm /etc/systemd/system/KeroTrack-{Web,MQTT}.service`, `rm -rf /opt/KeroTrack`, `userdel KeroTrack`. Keep the snapshot tarball for 30 days. Optionally power off the LXC.
 
 ### Rollback procedure (rehearsed before cutover)
 
 ```bash
-docker compose down            # on docker-host context (172.16.0.83)
-ssh root@172.16.0.14 "systemctl start KeroTrack-MQTT KeroTrack-Web"
+docker compose down            # on docker-host context (<docker-host>)
+ssh root@<v1-host> "systemctl start KeroTrack-MQTT KeroTrack-Web"
 # and re-create cron entries from the snapshot if step 3 removed them
 ```
 
-v2 writes are isolated in the `kerotrack-data` named volume; v1 state is intact in `/opt/KeroTrack` on `172.16.0.14`. Rollback window is **as long as v1 systemd services remain installed** — keep them in place for one full notifier cycle (1 week) post-cutover; only run step 8 (decommission) once that window expires cleanly.
+v2 writes are isolated in the `kerotrack-data` named volume; v1 state is intact in `/opt/KeroTrack` on `<v1-host>`. Rollback window is **as long as v1 systemd services remain installed** — keep them in place for one full notifier cycle (1 week) post-cutover; only run step 8 (decommission) once that window expires cleanly.
 
 ### Exit criteria
 
@@ -742,7 +749,7 @@ These are the live risks to watch as phases execute. Each one is mitigated above
 | 0 — Scaffold | Done | `6dd81e1` |
 | 1 — Settings foundation | Done | `Phase 1` commit |
 | 2 — DB engine, lifespan, health | Done | `Phase 2` commit |
-| 2.5 — Auth foundation (single-user, JobTrack pattern) | Done | `Phase 2.5` commit |
+| 2.5 — Auth foundation (single-user, session-cookie) | Done | `Phase 2.5` commit |
 | 3 — Data layer (parallel) | Done | `Phase 3` commit (live MQTT wired in `42f7018`) |
 | 4 — Scheduled jobs (parallel) | Done | `Phase 4` commit |
 | 5 — API surface | Done | `Phase 5` commit |
@@ -770,7 +777,7 @@ The plan deferred Phase 8 to the operator. In practice it was driven by
 agent + operator together on `2026-04-26`:
 
 1. **v1 snapshot pulled to local `legacy/`**:
-   `scp root@172.16.0.14:/opt/KeroTrack/data/{KeroTrack_data.db,historical_deliveries.txt} root@172.16.0.14:/opt/KeroTrack/config/config.yaml legacy/`
+   `scp root@<v1-host>:/opt/KeroTrack/data/{KeroTrack_data.db,historical_deliveries.txt} root@<v1-host>:/opt/KeroTrack/config/config.yaml legacy/`
 2. **Files staged into the running backend container** via
    `docker cp legacy/KeroTrack_data.db kerotrack-api:/tmp/v1.db` etc.
 3. **Migrator run with `--force`** against the deployed v2 stack:
@@ -783,8 +790,8 @@ agent + operator together on `2026-04-26`:
    scheduler's analysis run regenerates them clean). The single-user
    account created at first-time `/setup` was **not** touched by the
    migrator.
-5. **Operator stopped the v1 LXC** at `172.16.0.14`. KeroTrack-display +
-   HA continue to read from the shared `172.16.0.32` broker without
+5. **Operator stopped the v1 LXC** at `<v1-host>`. KeroTrack-display +
+   HA continue to read from the shared `<mqtt-broker>` broker without
    configuration changes.
 
 **Cutover is complete.** Operator's call: the powered-off v1 LXC stays

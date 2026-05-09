@@ -1,4 +1,4 @@
-"""Argon2id password hashing helpers (JobTrack pattern, ADR-0005)."""
+"""Argon2id password hashing helpers — see ADR-0005."""
 
 from __future__ import annotations
 

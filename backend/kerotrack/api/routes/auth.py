@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from kerotrack.api.csrf import generate_csrf_token
+from kerotrack.api.rate_limit import limiter
 from kerotrack.services.auth_service import (
     AuthError,
     authenticate,
@@ -19,7 +20,7 @@ router = APIRouter()
 
 class SetupBody(BaseModel):
     username: str = Field(min_length=1, max_length=64)
-    password: str = Field(min_length=1, max_length=512)
+    password: str = Field(min_length=12, max_length=512)
 
 
 class LoginBody(BaseModel):
@@ -29,7 +30,7 @@ class LoginBody(BaseModel):
 
 class ChangePasswordBody(BaseModel):
     old_password: str = Field(min_length=1, max_length=512)
-    new_password: str = Field(min_length=1, max_length=512)
+    new_password: str = Field(min_length=12, max_length=512)
 
 
 def _raise_auth(exc: AuthError) -> None:
@@ -48,6 +49,7 @@ async def setup_status(request: Request) -> dict[str, bool]:
 
 
 @router.post("/api/setup")
+@limiter.limit("5/minute")
 async def setup(body: SetupBody, request: Request) -> dict[str, str]:
     sf = request.app.state.session_factory
     try:
@@ -59,6 +61,7 @@ async def setup(body: SetupBody, request: Request) -> dict[str, str]:
 
 
 @router.post("/api/auth/login")
+@limiter.limit("5/minute")
 async def login(body: LoginBody, request: Request) -> dict[str, str]:
     sf = request.app.state.session_factory
     try:

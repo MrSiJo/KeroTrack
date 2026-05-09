@@ -15,7 +15,7 @@ logging:
   level: INFO
 web:
   secret_key: redacted
-  host: 0.0.0.0
+  host: 192.0.2.1
   port: 5000
 notifications:
   apprise_urls:
@@ -59,7 +59,7 @@ detection:
   warm_temperature_threshold: 16
   leak_detection_period_days: 3
 mqtt:
-  broker: 172.16.0.32
+  broker: 192.0.2.32
   port: 1883
   username: oil
   password: oil
@@ -84,7 +84,7 @@ def test_every_mapped_key_lands_in_settings() -> None:
         "tank.length_cm": 178.5,
         "boiler.model": "WB",
         "boiler.fuel_rate_l_per_h": 2.33,
-        "mqtt.broker": "172.16.0.32",
+        "mqtt.broker": "192.0.2.32",
         "mqtt.password": "oil",
         "mqtt.topic_readings": "lilygo/lilygo_lora32/RTL_433toMQTT/Oil-SonicAdv/5434428",
         "mqtt.topic_analytics": "oiltank/analysis",

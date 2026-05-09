@@ -13,11 +13,14 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from starlette.middleware.sessions import SessionMiddleware
 
 from kerotrack.api.auth_middleware import RequireAuthMiddleware
 from kerotrack.api.csrf import CSRFMiddleware
 from kerotrack.api.errors import install_error_handlers
+from kerotrack.api.rate_limit import limiter
 from kerotrack.api.routes.admin import router as admin_router
 from kerotrack.api.routes.analysis import router as analysis_router
 from kerotrack.api.routes.auth import router as auth_router
@@ -106,6 +109,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="KeroTrack v2", version="0.0.0", lifespan=lifespan)
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
     install_error_handlers(app)
     app.include_router(health_router)
     app.include_router(auth_router)
@@ -129,7 +134,7 @@ def create_app() -> FastAPI:
     app.add_middleware(
         SessionMiddleware,
         secret_key=secret_key,
-        https_only=False,
+        https_only=boot.session_cookie_secure,
         same_site="lax",
         session_cookie="kerotrack_session",
     )

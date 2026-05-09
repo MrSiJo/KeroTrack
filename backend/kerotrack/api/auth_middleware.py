@@ -1,4 +1,4 @@
-"""RequireAuth middleware (ADR-0005, JobTrack pattern)."""
+"""RequireAuth middleware — see ADR-0005."""
 
 from __future__ import annotations
 

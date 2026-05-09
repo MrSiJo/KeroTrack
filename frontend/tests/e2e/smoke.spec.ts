@@ -29,7 +29,7 @@ test("login page renders username + password inputs", async ({ page }) => {
 });
 
 test("api health endpoint reports db ok", async ({ request, baseURL }) => {
-  const apiBase = (baseURL ?? "http://172.16.0.83:9177").replace(":9177", ":9176");
+  const apiBase = (baseURL ?? "http://localhost:9177").replace(":9177", ":9176");
   const resp = await request.get(`${apiBase}/api/health`);
   expect(resp.ok()).toBeTruthy();
   const body = await resp.json();

@@ -136,7 +136,11 @@ async def migrate(
             dst_cols = set(model.__table__.columns.keys())
             common = [c for c in src_cols if c in dst_cols]
 
-            select_sql = f"SELECT {', '.join(common)} FROM {table}"
+            # `table` is a key of the hardcoded TABLE_TO_MODEL dict, and
+            # `common` is the intersection of the source schema with the v2
+            # ORM column set — neither is reachable from user input. This
+            # CLI is invoked manually against a developer-supplied DB file.
+            select_sql = f"SELECT {', '.join(common)} FROM {table}"  # nosec B608  # noqa: S608
             cur = src.execute(select_sql)
             rows = cur.fetchall()
 

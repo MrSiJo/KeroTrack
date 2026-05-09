@@ -14,21 +14,28 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[TestClie
     db = tmp_path / "routes.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db.as_posix()}")
     monkeypatch.setenv("APP_SECRET_KEY", "0" * 64)
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
     from kerotrack.bootstrap import reset_bootstrap_cache
 
     reset_bootstrap_cache()
     from kerotrack.main import create_app
 
     app = create_app()
+    app.state.limiter.enabled = False
     with TestClient(app) as c:
         # bootstrap + login so all gated routes are reachable.
-        c.post("/api/setup", json={"username": "admin", "password": "x"})
+        c.post(
+            "/api/setup",
+            json={"username": "admin", "password": "hunter2-strong-pw"},
+        )
         login = c.post(
-            "/api/auth/login", json={"username": "admin", "password": "x"}
+            "/api/auth/login",
+            json={"username": "admin", "password": "hunter2-strong-pw"},
         )
         token = login.json()["csrf_token"]
         c.headers.update({"X-CSRF-Token": token})
         yield c
+    app.state.limiter.enabled = True
     reset_bootstrap_cache()
 
 

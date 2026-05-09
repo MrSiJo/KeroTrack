@@ -1,4 +1,4 @@
-"""CSRF middleware on mutating verbs (ADR-0005, JobTrack pattern)."""
+"""CSRF middleware on mutating verbs — see ADR-0005."""
 
 from __future__ import annotations
 

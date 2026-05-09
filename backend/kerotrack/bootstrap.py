@@ -41,6 +41,10 @@ class Bootstrap(BaseSettings):
     database_url: str = "sqlite+aiosqlite:////app/data/kerotrack.db"
     vite_api_url: str = "http://localhost:9176"
     app_secret_key: str = ""
+    # Default deployment runs behind nginx-proxy-manager terminating TLS, so
+    # the session cookie is `Secure`. Override to `false` for plain-HTTP
+    # local dev or test rigs that drive the API over `http://`.
+    session_cookie_secure: bool = True
 
     @field_validator("app_secret_key")
     @classmethod

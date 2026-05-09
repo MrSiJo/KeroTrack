@@ -176,7 +176,7 @@
         <p class="text-[11px] text-text-subtle">Where readings come from. The Watchman sensor publishes here; KeroTrack subscribes.</p>
         <label class="block">
           <span class="text-[11px] text-text-muted">Host</span>
-          <input class="mt-1 w-full rounded border border-border bg-bg-elev px-2 py-1.5 text-sm text-text" bind:value={mqttBroker} placeholder="e.g. 192.168.1.10" />
+          <input class="mt-1 w-full rounded border border-border bg-bg-elev px-2 py-1.5 text-sm text-text" bind:value={mqttBroker} placeholder="e.g. mqtt.lan" />
         </label>
         <div class="grid grid-cols-2 gap-3">
           <label class="block">

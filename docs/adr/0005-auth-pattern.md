@@ -1,4 +1,4 @@
-# ADR-0005: Single-user auth — JobTrack pattern (argon2id + sessions + CSRF)
+# ADR-0005: Single-user auth — argon2id + sessions + CSRF
 
 **Status:** Accepted
 **Date:** 2026-04-25
@@ -7,28 +7,34 @@
 
 ## Context
 
-KeroTrack v1 had no auth — the dashboard sat on a private LAN. The v2 spec originally
-deferred auth to v2.1 with a `RequireAuthMiddleware` slot reserved. The operator has
-since asked for parity with the sibling projects so the three apps log in the same way.
+KeroTrack v1 had no auth — the dashboard sat on a private LAN. The v2 spec
+originally deferred auth to v2.1 with a `RequireAuthMiddleware` slot
+reserved. The operator has since asked for proper auth so v2 can be
+exposed via a reverse proxy without leaving the API world-readable.
 
-The two siblings differ:
+Two viable patterns were on the table:
 
-- **JobTrack** — Starlette `SessionMiddleware` with HTTP-only signed cookie, `argon2-cffi`
-  for password hashing, CSRF middleware on mutating verbs, first-time `/setup` flow that
-  bootstraps the single user and stores `APP_SECRET_KEY`-derived material.
-- **FinTrack** — JWT with `bcrypt`, `passlib`, bearer header. Older pattern.
+- **Cookie sessions.** Starlette `SessionMiddleware` with an HTTP-only
+  signed cookie, `argon2-cffi` for password hashing, CSRF middleware on
+  mutating verbs, first-time `/setup` flow that bootstraps the single
+  user and stores `APP_SECRET_KEY`-derived material.
+- **JWT bearer tokens.** `bcrypt` + `passlib`, bearer header. Older
+  pattern; common in stateless multi-tenant APIs.
 
-JobTrack's pattern is the more recent and the one the spec already anticipated
-("JobTrack-style argon2 + sessions"). FinTrack's JWT model is incidental — it predates
-JobTrack and was not chosen for KeroTrack v2.
+The session pattern is the better fit for a single-user SPA on a private
+network: cookies are SameSite-protected, free logout via `session.clear()`,
+no revocation list to manage, and the frontend never has to handle a token
+explicitly.
 
 ## Decision
 
-KeroTrack v2 uses the **JobTrack** auth pattern verbatim:
+KeroTrack v2 uses the **session-cookie** auth pattern:
 
 - **Hashing:** `argon2-cffi`'s `PasswordHasher`. Default Argon2id parameters.
 - **Sessions:** Starlette `SessionMiddleware` signed with `APP_SECRET_KEY` (32-byte random
-  hex). HTTP-only cookie, `https_only=False` for the LAN deployment, `same_site=lax`.
+  hex). HTTP-only cookie, `same_site=lax`. `Secure` flag toggled by
+  `SESSION_COOKIE_SECURE` (default true; deployment terminates TLS at
+  nginx-proxy-manager).
 - **CSRF:** Custom middleware that requires `X-CSRF-Token` on `POST/PUT/PATCH/DELETE` for
   authenticated `/api/*` requests. Token issued on login, recoverable from `/api/auth/me`,
   stored in the session.
@@ -41,6 +47,8 @@ KeroTrack v2 uses the **JobTrack** auth pattern verbatim:
 - **Single user.** The DB stores at most one user row; v2 is a single-operator app. The
   `users` table is structurally extensible (could grow a `roles` column, etc.) but the
   service refuses to create a second user.
+- **Rate limiting.** `slowapi` enforces 5 attempts/minute per remote IP on
+  `/api/setup` and `/api/auth/login` to blunt credential stuffing.
 
 ### Storage
 
@@ -63,8 +71,7 @@ keeps the `setting_changes` audit log free of password churn.
 
 SvelteKit gets:
 
-- `lib/stores/auth.ts` — current user, `needsSetup`, `csrfToken`. Mirrors JobTrack's
-  `AuthProvider`.
+- `lib/stores/auth.ts` — current user, `needsSetup`, `csrfToken`.
 - `routes/login/+page.svelte`, `routes/setup/+page.svelte`.
 - Layout-level guard in `routes/+layout.svelte`: while `loading`, render a spinner; if
   `needsSetup`, redirect to `/setup`; if no `user`, redirect to `/login`; else render the
@@ -82,18 +89,20 @@ SvelteKit gets:
   HTTP client.
 - Dependencies added: `argon2-cffi`, `itsdangerous` (transitively via Starlette
   `SessionMiddleware`), `cryptography` (already required for `Fernet` if/when we add
-  encrypted secrets later).
+  encrypted secrets later), `slowapi` (rate limiting).
 - One slot reserved for HA / Home Assistant integration if that ever calls the v2 API
   directly: a long-lived API token check could be added as a second auth backend without
   touching the session flow. Out of scope for v2.0.
 
 ## Alternatives considered
 
-- **JWT (FinTrack pattern).** Rejected — bearer tokens leak more easily on a LAN web app
-  and there's no SPA reason to prefer them over session cookies. JobTrack's session model
-  also gives us free logout (`session.clear()`) without revocation lists.
+- **JWT bearer tokens.** Rejected — bearer tokens leak more easily on a
+  LAN web app and there's no SPA reason to prefer them over session
+  cookies. The session model also gives us free logout
+  (`session.clear()`) without revocation lists.
 - **HTTP basic auth at nginx.** Tempting for simplicity but blocks the SPA from showing a
   branded login page and a `/setup` flow, and forces us to manage `htpasswd` on the host
   outside the container.
-- **No auth (original v2.0 plan).** Operator now wants parity with JobTrack/FinTrack —
-  decision overturned.
+- **No auth (original v2.0 plan).** Decision overturned — the operator
+  asked for proper auth so v2 can sit behind a reverse proxy without
+  exposing an unauthenticated API.

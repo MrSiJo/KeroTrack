@@ -8,7 +8,9 @@
 
 v1 read all configuration from `config/config.yaml` — tank dimensions, boiler spec, MQTT credentials, Apprise URLs, schedules, detection thresholds, oil-price scraper URLs. Editing required SSH-ing to the host and restarting services.
 
-The sibling FinTrack project keeps app secrets in `.env` and operational toggles in a `settings` table edited via the UI. JobTrack uses `pydantic-settings` with `.env` for everything.
+Two patterns were on the table: keep everything in `.env` and reload on
+restart, or split bootstrap-only values into `.env` and operational
+toggles into a database `settings` table edited via the UI.
 
 ## Decision
 

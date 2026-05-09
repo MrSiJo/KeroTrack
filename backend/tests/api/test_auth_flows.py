@@ -14,23 +14,26 @@ def client(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Iterator[TestClie
     db = tmp_path / "auth.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite+aiosqlite:///{db.as_posix()}")
     monkeypatch.setenv("APP_SECRET_KEY", "0" * 64)
+    monkeypatch.setenv("SESSION_COOKIE_SECURE", "false")
     from kerotrack.bootstrap import reset_bootstrap_cache
     reset_bootstrap_cache()
 
     from kerotrack.main import create_app
 
     app = create_app()
+    app.state.limiter.enabled = False
     with TestClient(app) as c:
         yield c
+    app.state.limiter.enabled = True
     reset_bootstrap_cache()
 
 
-def _setup(client: TestClient, *, username: str = "admin", password: str = "hunter2") -> None:
+def _setup(client: TestClient, *, username: str = "admin", password: str = "hunter2-strong-pw") -> None:
     resp = client.post("/api/setup", json={"username": username, "password": password})
     assert resp.status_code == 200, resp.text
 
 
-def _login(client: TestClient, *, username: str = "admin", password: str = "hunter2") -> str:
+def _login(client: TestClient, *, username: str = "admin", password: str = "hunter2-strong-pw") -> str:
     resp = client.post("/api/auth/login", json={"username": username, "password": password})
     assert resp.status_code == 200, resp.text
     return resp.json()["csrf_token"]
@@ -51,7 +54,8 @@ def test_setup_status_pre_and_post(client: TestClient) -> None:
 def test_setup_rejects_second_user(client: TestClient) -> None:
     _setup(client)
     resp = client.post(
-        "/api/setup", json={"username": "second", "password": "x"}
+        "/api/setup",
+        json={"username": "second", "password": "another-strong-pw"},
     )
     assert resp.status_code == 409
     assert resp.json()["detail"]["error"] == "already_setup"
@@ -63,7 +67,7 @@ def test_setup_rejects_second_user(client: TestClient) -> None:
 def test_login_success_returns_csrf_token(client: TestClient) -> None:
     _setup(client)
     resp = client.post(
-        "/api/auth/login", json={"username": "admin", "password": "hunter2"}
+        "/api/auth/login", json={"username": "admin", "password": "hunter2-strong-pw"}
     )
     assert resp.status_code == 200
     body = resp.json()
@@ -113,16 +117,21 @@ def test_change_password_rotates(client: TestClient) -> None:
     resp = client.post(
         "/api/auth/change-password",
         headers={"X-CSRF-Token": token},
-        json={"old_password": "hunter2", "new_password": "newpass"},
+        json={
+            "old_password": "hunter2-strong-pw",
+            "new_password": "newpass-strong-pw",
+        },
     )
     assert resp.status_code == 200
     # Old creds fail, new creds work.
     bad = client.post(
-        "/api/auth/login", json={"username": "admin", "password": "hunter2"}
+        "/api/auth/login",
+        json={"username": "admin", "password": "hunter2-strong-pw"},
     )
     assert bad.status_code == 401
     good = client.post(
-        "/api/auth/login", json={"username": "admin", "password": "newpass"}
+        "/api/auth/login",
+        json={"username": "admin", "password": "newpass-strong-pw"},
     )
     assert good.status_code == 200
 
@@ -133,7 +142,10 @@ def test_change_password_wrong_old(client: TestClient) -> None:
     resp = client.post(
         "/api/auth/change-password",
         headers={"X-CSRF-Token": token},
-        json={"old_password": "wrong", "new_password": "anything"},
+        json={
+            "old_password": "wrong-but-long-enough",
+            "new_password": "anything-long-enough",
+        },
     )
     assert resp.status_code == 400
     assert resp.json()["detail"]["error"] == "invalid_password"
@@ -144,7 +156,10 @@ def test_change_password_requires_csrf(client: TestClient) -> None:
     _login(client)
     resp = client.post(
         "/api/auth/change-password",
-        json={"old_password": "hunter2", "new_password": "newpass"},
+        json={
+            "old_password": "hunter2-strong-pw",
+            "new_password": "newpass-strong-pw",
+        },
     )
     assert resp.status_code == 403
     assert resp.json()["error"] == "csrf_missing"
