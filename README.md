@@ -27,7 +27,7 @@ docker compose pull
 docker compose up -d
 ```
 
-Open <http://localhost:9177> in a browser. The first-run `/setup` page prompts you to create the single operator account (password ≥ 12 chars). After login the `/onboarding` wizard collects the basics:
+Open the dashboard in a browser at `http://<docker-host>:9177` — substitute your Docker host's IP or hostname (use `localhost` only if you ran the stack on the same machine you're browsing from). The first-run `/setup` page prompts you to create the single operator account (password ≥ 12 chars). After login the `/onboarding` wizard collects the basics:
 
 1. **MQTT** — broker host/port, username, password, the topic the LilyGO publishes to (default `oiltank/level`), and the topics KeroTrack republishes to.
 2. **Tank** — capacity (L), length / width / height (cm). Defaults match a standard 1225 L domestic tank.
