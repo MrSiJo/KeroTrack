@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.0](https://github.com/MrSiJo/KeroTrack/compare/v1.0.1...v1.1.0) (2026-05-09)
+
+
+### Features
+
+* **mqtt:** add topic_readings_publish setting + LilyGO-shaped subscribe default ([e7b4c03](https://github.com/MrSiJo/KeroTrack/commit/e7b4c036671e0bdf85defe70426f9f67a6bcca6e))
+
 ## [1.0.1](https://github.com/MrSiJo/KeroTrack/compare/v1.0.0...v1.0.1) (2026-05-09)
 
 
