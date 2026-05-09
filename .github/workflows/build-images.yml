@@ -19,16 +19,16 @@
 name: Build container images
 
 on:
+  # NOTE: paths-ignore intentionally omitted. GitHub applies on.push
+  # filters globally, so a paths-ignore here would also suppress tag
+  # pushes — and release-please's tag commit only touches CHANGELOG.md
+  # and .release-please-manifest.json, which we'd otherwise want to
+  # exclude from main-branch builds. Building on every push to main is
+  # cheap with the GHA cache, and avoids needing two separate workflow
+  # files to scope the filter to branches.
   push:
     branches: [main]
     tags: ['v*.*.*']
-    paths-ignore:
-      - '**/*.md'
-      - LICENSE
-      - .gitignore
-      - .pre-commit-config.yaml
-      - .release-please-manifest.json
-      - release-please-config.json
   pull_request:
     branches: [main]
     paths:
