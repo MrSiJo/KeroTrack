@@ -29,7 +29,7 @@ docker compose up -d
 
 Open the dashboard in a browser at `http://<docker-host>:9177` — substitute your Docker host's IP or hostname (use `localhost` only if you ran the stack on the same machine you're browsing from). The first-run `/setup` page prompts you to create the single operator account (password ≥ 12 chars). After login the `/onboarding` wizard collects the basics:
 
-1. **MQTT** — broker host/port, username, password, the topic the LilyGO publishes to (default `oiltank/level`), and the topics KeroTrack republishes to.
+1. **MQTT** — broker host/port, username, password, and the topic the LilyGO publishes to. The default subscribe pattern is `lilygo/+/RTL_433toMQTT/Oil-SonicAdv/+` (the `+` wildcards mean any LilyGO hostname and any Watchman device ID match without further configuration). Under "Advanced — output topics" the wizard exposes the three publish topics KeroTrack uses (defaults: `oiltank/level`, `oiltank/analysis`, `oiltank/cost_analysis`) for KeroDisplay / Home Assistant compatibility.
 2. **Tank** — capacity (L), length / width / height (cm). Defaults match a standard 1225 L domestic tank.
 3. **Boiler** — model, burner, nozzle (gph), input/output kW, efficiency. All optional; defaults are reasonable averages.
 

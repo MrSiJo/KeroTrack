@@ -20,7 +20,9 @@
   let mqttUsername = $state("");
   let mqttPassword = $state("");
   let mqttTopicReadings = $state("");
+  let mqttTopicReadingsPublish = $state("");
   let mqttTopicAnalytics = $state("");
+  let mqttTopicCostanalysis = $state("");
 
   let tankCapacity = $state(0);
   let tankLength = $state(0);
@@ -55,7 +57,9 @@
     mqttPort = num("mqtt.port", 1883);
     mqttUsername = str("mqtt.username");
     mqttTopicReadings = str("mqtt.topic_readings");
+    mqttTopicReadingsPublish = str("mqtt.topic_readings_publish");
     mqttTopicAnalytics = str("mqtt.topic_analytics");
+    mqttTopicCostanalysis = str("mqtt.topic_costanalysis");
 
     tankCapacity = num("tank.capacity_l");
     tankLength = num("tank.length_cm");
@@ -74,7 +78,9 @@
       "mqtt.port": mqttPort,
       "mqtt.username": mqttUsername,
       "mqtt.topic_readings": mqttTopicReadings,
+      "mqtt.topic_readings_publish": mqttTopicReadingsPublish,
       "mqtt.topic_analytics": mqttTopicAnalytics,
+      "mqtt.topic_costanalysis": mqttTopicCostanalysis,
       "tank.capacity_l": tankCapacity,
       "tank.length_cm": tankLength,
       "tank.width_cm": tankWidth,
@@ -111,7 +117,9 @@
       "mqtt.port": mqttPort,
       "mqtt.username": mqttUsername,
       "mqtt.topic_readings": mqttTopicReadings,
+      "mqtt.topic_readings_publish": mqttTopicReadingsPublish,
       "mqtt.topic_analytics": mqttTopicAnalytics,
+      "mqtt.topic_costanalysis": mqttTopicCostanalysis,
       "tank.capacity_l": tankCapacity,
       "tank.length_cm": tankLength,
       "tank.width_cm": tankWidth,
@@ -192,16 +200,30 @@
           <span class="text-[11px] text-text-muted">Password (leave blank if unauthenticated)</span>
           <input type="password" class="mt-1 w-full rounded border border-border bg-bg-elev px-2 py-1.5 text-sm text-text" bind:value={mqttPassword} autocomplete="new-password" />
         </label>
-        <div class="grid grid-cols-2 gap-3">
-          <label class="block">
-            <span class="text-[11px] text-text-muted">Readings topic</span>
-            <input class="mt-1 w-full rounded border border-border bg-bg-elev px-2 py-1.5 text-sm text-text" bind:value={mqttTopicReadings} />
-          </label>
-          <label class="block">
-            <span class="text-[11px] text-text-muted">Analytics topic</span>
-            <input class="mt-1 w-full rounded border border-border bg-bg-elev px-2 py-1.5 text-sm text-text" bind:value={mqttTopicAnalytics} />
-          </label>
-        </div>
+        <label class="block">
+          <span class="text-[11px] text-text-muted">Readings topic (subscribe — what the LilyGO publishes to)</span>
+          <input class="mt-1 w-full rounded border border-border bg-bg-elev px-2 py-1.5 text-sm font-mono text-text" bind:value={mqttTopicReadings} placeholder="lilygo/+/RTL_433toMQTT/Oil-SonicAdv/+" />
+          <span class="mt-1 block text-[10px] text-text-subtle">Default matches the standard LilyGO LoRa32 + OpenMQTTGateway shape. <code>+</code> wildcards each path level so the device hostname and Watchman ID don't matter.</span>
+        </label>
+
+        <details class="rounded border border-border bg-bg-elev/50 px-3 py-2">
+          <summary class="cursor-pointer text-[11px] text-text-muted hover:text-text">Advanced — output topics</summary>
+          <div class="mt-3 space-y-3">
+            <p class="text-[10px] text-text-subtle">KeroTrack publishes the enriched reading + analytics + cost figures back to MQTT under these topics. Defaults are KeroDisplay/Home-Assistant compatible — only change them if you need to namespace your broker.</p>
+            <label class="block">
+              <span class="text-[11px] text-text-muted">Level topic (publish)</span>
+              <input class="mt-1 w-full rounded border border-border bg-bg-elev px-2 py-1.5 text-sm font-mono text-text" bind:value={mqttTopicReadingsPublish} />
+            </label>
+            <label class="block">
+              <span class="text-[11px] text-text-muted">Analysis topic (publish)</span>
+              <input class="mt-1 w-full rounded border border-border bg-bg-elev px-2 py-1.5 text-sm font-mono text-text" bind:value={mqttTopicAnalytics} />
+            </label>
+            <label class="block">
+              <span class="text-[11px] text-text-muted">Cost analysis topic (publish)</span>
+              <input class="mt-1 w-full rounded border border-border bg-bg-elev px-2 py-1.5 text-sm font-mono text-text" bind:value={mqttTopicCostanalysis} />
+            </label>
+          </div>
+        </details>
       </section>
     {:else if step === 2}
       <section class="mt-6 space-y-3">

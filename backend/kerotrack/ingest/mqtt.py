@@ -223,11 +223,9 @@ class MqttIngest:
         return MqttPublisher(client=self._adapter)
 
     async def _refresh_publisher_topics(self) -> None:
-        topic_level = await self._settings.get("mqtt.topic_readings_publish") \
-            if False else "oiltank/level"
+        topic_level = str(await self._settings.get("mqtt.topic_readings_publish"))
         topic_analysis = str(await self._settings.get("mqtt.topic_analytics"))
         topic_costanalysis = str(await self._settings.get("mqtt.topic_costanalysis"))
-        # Always publish to v1-compatible /level topic for KeroDisplay/HA.
         self.publisher = MqttPublisher(
             client=self._adapter,
             topic_level=topic_level,
