@@ -1,28 +1,23 @@
 ![logo](assets/logo.png)
 
-# KeroTrack v2
+# KeroTrack
 
-KeroTrack v2 is a full refactor of [KeroTrack](https://github.com/MrSiJo/KeroTrack) (now archived) — a domestic heating-oil monitoring system that ingests MQTT messages from a Watchman Sonic transmitter (via LilyGO LoRa32 + OpenMQTTGateway) and exposes them through an API + SPA dashboard.
+KeroTrack is a domestic heating-oil monitoring system that ingests MQTT messages from a Watchman Sonic transmitter (via LilyGO LoRa32 + OpenMQTTGateway) and exposes them through an API + SPA dashboard.
 
 > **Status: pre-alpha.** This repo currently contains only the design spec; backend and frontend implementation start once the plan is approved.
 
-## What changed from v1
-
-v1 was a Flask + Socket.IO + Plotly app, a separate MQTT subscriber service, and several cron-driven Python scripts, all configured via a hand-edited YAML file and installed onto the host with `KeroTrack_Setup.sh`.
-
-v2 collapses all of that into:
+## Architecture
 
 - **`backend/`** — FastAPI + async SQLAlchemy + APScheduler + `aiomqtt`. Owns ingest, analysis, scheduling, notifications, and the JSON API. Single image, single process.
 - **`frontend/`** — SvelteKit + TypeScript + Tailwind + ECharts SPA, served by nginx.
 - **`compose.yaml`** — two-service stack (`backend`, `frontend`) on a private Docker network, persistent named volumes for DB and logs.
-- **DB-backed settings** — every value that used to live in `config/config.yaml` (tank dimensions, boiler spec, MQTT credentials, schedules, Apprise URLs, …) now lives in a `settings` table, edited via `/api/settings` and the Settings page in the UI. The only `.env` keys are bootstrap concerns: `DATABASE_URL`, `PORT`, `TZ`, `LOG_LEVEL`.
-- **No host cron, no systemd units, no `KeroTrack` system user.** APScheduler runs the analysis, cost analysis, and notifier jobs in-process.
+- **DB-backed settings** — tank dimensions, boiler spec, MQTT credentials, schedules, Apprise URLs, etc. live in a `settings` table, edited via `/api/settings` and the Settings page in the UI. The only `.env` keys are bootstrap concerns: `DATABASE_URL`, `PORT`, `TZ`, `LOG_LEVEL`.
+- **In-process scheduling.** APScheduler runs the analysis, cost analysis, and notifier jobs — no host cron, no systemd units, no separate system user.
 
-## Compatibility constraints kept from v1
+## Integrations
 
-- **MQTT contract is identical** so [KeroTrack-display](https://github.com/MrSiJo/KeroTrack-display) (the CYD ESP32 dashboard) keeps working unchanged. See the spec for the locked field list on `oiltank/level` and `oiltank/analysis`.
-- **Home Assistant integration** files (`ha-oilanalysis.yaml`, `lovelace-dashboard.yaml`) keep working — sensor field names are stable.
-- **SQLite schema** for `readings`, `analysis_results`, `refill_periods`, `energy_metrics`, `hdd_data`, `cost_analysis`, `refill_data` is preserved; v1 → v2 migration is data-only.
+- **[KeroTrack-display](https://github.com/MrSiJo/KeroTrack-display)** — CYD ESP32 dashboard. Reads `oiltank/level` and `oiltank/analysis` over MQTT.
+- **Home Assistant** — `ha-oilanalysis.yaml` and `lovelace-dashboard.yaml` provide sensors and a Lovelace dashboard.
 
 ## Plan
 
@@ -31,7 +26,7 @@ The full design + implementation plan is in [`docs/plans/2026-04-25-v2-redesign.
 ## Layout
 
 ```
-KeroTrack-v2/
+KeroTrack/
 ├── backend/        # FastAPI app (kerotrack package), pyproject.toml, Dockerfile, tests
 ├── frontend/       # SvelteKit + TS app, nginx Dockerfile
 ├── compose.yaml    # docker compose stack
