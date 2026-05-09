@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/MrSiJo/KeroTrack/compare/v1.0.0...v1.0.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* **ci:** drop paths-ignore from build-images so tag pushes always trigger ([f357d2d](https://github.com/MrSiJo/KeroTrack/commit/f357d2d2eeb443cad9e9d1e429328f55b0598e3a))
+
 ## 1.0.0 (2026-05-09)
 
 
