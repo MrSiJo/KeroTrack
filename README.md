@@ -11,6 +11,33 @@ It is built around a few ideas:
 - **In-process scheduling.** APScheduler runs the analysis, cost-analysis, and notifier jobs. No host cron, no systemd units.
 - **Single operator.** ADR-0005 — argon2id session-cookie auth, one user per deployment, first-run `/setup` wizard.
 
+## Screenshots
+
+![Dashboard](assets/screenshots/dashboard.png)
+
+<table>
+  <tr>
+    <td><img src="assets/screenshots/trends.png" alt="Trends" /></td>
+    <td><img src="assets/screenshots/forecast.png" alt="Forecast" /></td>
+    <td><img src="assets/screenshots/costs.png" alt="Costs" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Trends</sub></td>
+    <td align="center"><sub>Forecast</sub></td>
+    <td align="center"><sub>Costs</sub></td>
+  </tr>
+  <tr>
+    <td><img src="assets/screenshots/records.png" alt="Records" /></td>
+    <td><img src="assets/screenshots/mqtt.png" alt="MQTT" /></td>
+    <td><img src="assets/screenshots/settings.png" alt="Settings" /></td>
+  </tr>
+  <tr>
+    <td align="center"><sub>Records</sub></td>
+    <td align="center"><sub>MQTT</sub></td>
+    <td align="center"><sub>Settings</sub></td>
+  </tr>
+</table>
+
 ## Quickstart — pull images from GHCR
 
 This is the easiest path. You need `docker` (with `compose`) and a way to generate a random secret. No source code, no build toolchain, no Python.
