@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from sqlalchemy import asc, select
+from sqlalchemy import asc, delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kerotrack.clock import parse_local
@@ -28,6 +28,7 @@ from kerotrack.ingest.recalc import (
     _raw_air_gap_litres,
 )
 from kerotrack.models.reading import Reading
+from kerotrack.models.refill_period import RefillPeriod
 from kerotrack.settings.service import SettingsService
 
 logger = logging.getLogger(__name__)
@@ -144,12 +145,6 @@ async def reset_noise_flags(
             )
         prev = curr
 
-    report: dict[str, Any] = {
-        "apply": apply,
-        "reset_count": len(affected),
-        "sample": affected[:50],
-    }
-
     if apply and affected:
         affected_dates = {a["date"] for a in affected}
         async with sf() as session:
@@ -168,4 +163,52 @@ async def reset_noise_flags(
                 row.raw_flags = _stamp_sentinel(row.raw_flags)
             await session.commit()
 
-    return report
+    # Clean up refill_periods rows whose end_date no longer corresponds
+    # to a refill_detected='y' reading. Skip operator-curated rows
+    # (non-empty invoice_ref or refill_notes) — those are real refills
+    # the user has annotated and we don't want to surprise them.
+    async with sf() as session:
+        valid_anchors = set(
+            (
+                await session.execute(
+                    select(Reading.date).where(Reading.refill_detected == "y")
+                )
+            )
+            .scalars()
+            .all()
+        )
+        candidate_periods = (
+            (
+                await session.execute(
+                    select(RefillPeriod)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        orphan_periods: list[dict[str, Any]] = []
+        for p in candidate_periods:
+            if p.end_date in valid_anchors:
+                continue
+            if (p.refill_invoice or "") or (p.refill_notes or ""):
+                continue
+            orphan_periods.append(
+                {"start_date": p.start_date, "end_date": p.end_date}
+            )
+        if apply and orphan_periods:
+            for op in orphan_periods:
+                await session.execute(
+                    delete(RefillPeriod).where(
+                        RefillPeriod.start_date == op["start_date"],
+                        RefillPeriod.end_date == op["end_date"],
+                    )
+                )
+            await session.commit()
+
+    return {
+        "apply": apply,
+        "reset_count": len(affected),
+        "sample": affected[:50],
+        "periods_deleted": len(orphan_periods),
+        "periods_deleted_sample": orphan_periods[:50],
+    }

@@ -130,11 +130,12 @@ def detect_refill(
 
 NOISE_SUPPRESSED_SENTINEL = "noise_suppressed"
 # Inter-reading gaps longer than this disable the sanity bound. The
-# Watchman Sonic broadcasts every ~30 min in normal operation, so a gap
-# of a few hours means we lost samples (or the unit was offline) and the
-# delta could legitimately reflect a refill / outage event. Only spikes
-# at the normal cadence are sensor multipath misreads.
-SANITY_BOUND_MAX_GAP_HOURS = 1.0
+# Watchman Sonic broadcasts every ~30 min in normal operation; one
+# missed broadcast lands the gap at ~60 min + broadcast-time jitter
+# (real-world traces show 3601-3605 s). 1.25 h covers that window
+# without admitting genuine multi-hour outage gaps where a refill could
+# plausibly have happened.
+SANITY_BOUND_MAX_GAP_HOURS = 1.25
 # The Watchman Sonic Advanced reports air gap as an integer cm. A single
 # real-consumption "tick" therefore looks like a 1 cm jump (~9 L on a
 # 1225 L tank). We allow 2 cm of slack to absorb that quantisation plus a

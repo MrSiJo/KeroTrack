@@ -340,6 +340,22 @@ def test_sanity_bound_keeps_raw_depth_and_litres_honest() -> None:
     assert result["litres_remaining"] < 400.0  # ~329, sensor-reported
 
 
+def test_sanity_bound_catches_60min_plus_jitter() -> None:
+    # Real-world cadence: sensor broadcasts every ~30 min, occasionally
+    # missing one. The gap-to-previous then lands at ~3601 s (60 min +
+    # broadcast-time jitter). Those must still be caught — they were in
+    # the May 2026 multipath fingerprint.
+    prev_dt = datetime(2026, 5, 24, 11, 9, 38)
+    curr_dt = prev_dt + timedelta(seconds=3602)  # 60 min 2 s
+    payload = _payload(when=curr_dt, depth_cm=100.0, temp_c=23.0)
+    prev = _prev_at(prev_dt, air_gap_cm=80.0, litres_remaining=520.0)
+
+    result = process(payload, _ctx(), previous=prev)
+
+    assert result["leak_detected"] == "n"
+    assert "noise_suppressed" in str(result["raw_flags"] or "")
+
+
 def test_sanity_bound_skipped_when_interval_exceeds_max_gap() -> None:
     # First reading after a multi-hour gap — sensor offline, settings page open
     # during a refill, whatever. We have no idea what happened, so a 800 L

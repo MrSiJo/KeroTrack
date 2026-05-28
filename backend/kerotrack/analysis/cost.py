@@ -83,13 +83,24 @@ async def _all_refill_readings(sf: async_sessionmaker) -> list[Reading]:
 async def _readings_between(
     sf: async_sessionmaker, start: str, end: str, *, inclusive_end: bool = True
 ) -> list[Reading]:
+    """Window readings between two timestamps for cost walkers.
+
+    Excludes rows tagged ``noise_suppressed`` in ``raw_flags`` — the
+    per-pair PPL walker would otherwise treat a multipath spike's bad
+    litres value as real consumption when the next reading reverts.
+    """
     async with sf() as session:
         end_clause = Reading.date <= end if inclusive_end else Reading.date < end
         return (
             (
                 await session.execute(
                     select(Reading)
-                    .where(Reading.date >= start, end_clause)
+                    .where(
+                        Reading.date >= start,
+                        end_clause,
+                        (Reading.raw_flags.is_(None))
+                        | (~Reading.raw_flags.like("%noise_suppressed%")),
+                    )
                     .order_by(asc(Reading.date))
                 )
             )

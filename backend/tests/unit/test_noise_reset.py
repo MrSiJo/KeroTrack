@@ -113,6 +113,53 @@ async def test_preserves_legitimate_long_interval_refill(sf) -> None:
 
 
 @pytest.mark.asyncio
+async def test_apply_deletes_orphan_refill_periods(sf) -> None:
+    """Refill period rows whose end_date no longer maps to a 'y' anchor
+    (because the noise-cleanup reset it) should be removed — except when
+    the operator has curated them with an invoice or notes."""
+    from kerotrack.models.refill_period import RefillPeriod
+
+    t0 = datetime(2026, 5, 22, 13, 9, 26)
+    t1 = t0 + timedelta(minutes=30)
+    t2 = t1 + timedelta(minutes=30)
+    await _seed(sf, [
+        # The pair that was 'y' on both ends — both get cleared.
+        _r(t0 - timedelta(minutes=30), air_gap_cm=80.0, litres=520.0),
+        _r(t0, air_gap_cm=100.0, litres=329.0, leak="y"),
+        _r(t1, air_gap_cm=80.0, litres=520.0, refill="y"),
+    ])
+    async with sf() as session:
+        # An orphan: end_date refers to the noisy refill (will be reset).
+        session.add(RefillPeriod(
+            start_date="2025-04-25 10:03:43",
+            end_date=t1.strftime("%Y-%m-%d %H:%M:%S"),
+            days=392,
+            total_consumption=780.0,
+            refill_invoice="",
+        ))
+        # A curated row: same anchor but invoice present — preserved.
+        session.add(RefillPeriod(
+            start_date="2024-10-10 13:47:57",
+            end_date=t1.strftime("%Y-%m-%d %H:%M:%S"),
+            days=600,
+            total_consumption=500.0,
+            refill_invoice="Standard Domestic Oil",
+        ))
+        await session.commit()
+
+    svc = SettingsService(sf)
+    report = await reset_noise_flags(sf, svc, apply=True)
+
+    assert report["periods_deleted"] == 1
+    async with sf() as session:
+        remaining = (
+            await session.execute(select(RefillPeriod))
+        ).scalars().all()
+    assert len(remaining) == 1
+    assert remaining[0].refill_invoice == "Standard Domestic Oil"
+
+
+@pytest.mark.asyncio
 async def test_dry_run_does_not_mutate(sf) -> None:
     t0 = datetime(2026, 5, 24, 12, 0, 0)
     await _seed(sf, [

@@ -155,6 +155,14 @@ async def _latest_refill_anchor(sf: async_sessionmaker) -> Reading | None:
 async def _readings_in_window(
     sf: async_sessionmaker, start_dt: datetime, end_dt: datetime
 ) -> list[Reading]:
+    """Window readings for delta walkers.
+
+    Excludes rows tagged ``noise_suppressed`` in ``raw_flags`` — those
+    carry the sensor's bad litres/air_gap, so feeding them into the
+    consumption/cost per-pair walkers would over-count usage on every
+    noise→good transition. Rows with NULL raw_flags (pre-feature data)
+    are kept.
+    """
     start = start_dt.strftime("%Y-%m-%d %H:%M:%S")
     end = end_dt.strftime("%Y-%m-%d %H:%M:%S")
     async with sf() as session:
@@ -162,7 +170,12 @@ async def _readings_in_window(
             (
                 await session.execute(
                     select(Reading)
-                    .where(Reading.date >= start, Reading.date <= end)
+                    .where(
+                        Reading.date >= start,
+                        Reading.date <= end,
+                        (Reading.raw_flags.is_(None))
+                        | (~Reading.raw_flags.like("%noise_suppressed%")),
+                    )
                     .order_by(asc(Reading.date))
                 )
             )

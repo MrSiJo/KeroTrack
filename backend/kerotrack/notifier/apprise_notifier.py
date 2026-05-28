@@ -49,6 +49,12 @@ class NotifierResult:
 async def _fetch_readings_between(
     sf: async_sessionmaker, start: str, end: str
 ) -> list[dict[str, Any]]:
+    """Window readings for the weekly digest.
+
+    Excludes rows tagged ``noise_suppressed`` — the weekly "🛢️ Refill
+    detected" notice fires off `delta >= refill_threshold`, which would
+    otherwise fire every time a noise reading reverts to truth.
+    """
     async with sf() as session:
         rows = (
             await session.execute(
@@ -59,7 +65,12 @@ async def _fetch_readings_between(
                     Reading.refill_detected,
                     Reading.percentage_remaining,
                 )
-                .where(Reading.date >= start, Reading.date <= end)
+                .where(
+                    Reading.date >= start,
+                    Reading.date <= end,
+                    (Reading.raw_flags.is_(None))
+                    | (~Reading.raw_flags.like("%noise_suppressed%")),
+                )
                 .order_by(Reading.date.asc())
             )
         ).all()
