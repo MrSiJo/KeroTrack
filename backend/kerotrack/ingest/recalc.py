@@ -221,6 +221,13 @@ class PreviousReading:
     date: datetime
     litres_remaining: float
     air_gap_cm: float
+    # The most recent reading in the DB, regardless of whether it was
+    # noise-suppressed. The sanity-bound watchdog uses THIS to decide
+    # whether the sensor was alive: after a chain of suppressed rows,
+    # `date` (the trusted baseline) can be hours older than
+    # `most_recent_date` while the sensor itself was broadcasting every
+    # 30 min. Defaults to `date` for the cold-start / first-reading case.
+    most_recent_date: datetime | None = None
 
 
 def process(
@@ -311,7 +318,16 @@ def process(
     # the row is recognisable in audits and in the UI.
     if prev_air_gap is not None and prev_date is not None:
         interval_s = (current_date - prev_date).total_seconds()
-        if 0 < interval_s <= SANITY_BOUND_MAX_GAP_HOURS * 3600:
+        # Cadence watchdog: use the most recent reading in DB (trusted
+        # OR noise-suppressed) for the gap check, not the trusted date.
+        # A chain of suppressed readings still proves the sensor was
+        # alive, so the bound should keep applying.
+        watchdog_date = (
+            previous.most_recent_date if previous is not None and previous.most_recent_date is not None
+            else prev_date
+        )
+        watchdog_gap_s = (current_date - watchdog_date).total_seconds()
+        if 0 < interval_s and 0 < watchdog_gap_s <= SANITY_BOUND_MAX_GAP_HOURS * 3600:
             bound = _physical_change_bound_l(
                 interval_seconds=interval_s,
                 current_temperature_c=current_temp,

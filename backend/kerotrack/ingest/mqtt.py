@@ -54,30 +54,49 @@ async def _load_previous(
         ~Reading.raw_flags.like("%noise_suppressed%")
     )
     async with sf() as session:
-        stmt = (
+        trusted_stmt = (
             select(Reading.date, Reading.litres_remaining, Reading.air_gap_cm)
             .where(noise_clause)
             .order_by(desc(Reading.date))
             .limit(1)
         )
+        watchdog_stmt = (
+            select(Reading.date).order_by(desc(Reading.date)).limit(1)
+        )
         if before_date is not None:
-            stmt = (
+            trusted_stmt = (
                 select(Reading.date, Reading.litres_remaining, Reading.air_gap_cm)
                 .where(Reading.date < before_date, noise_clause)
                 .order_by(desc(Reading.date))
                 .limit(1)
             )
-        row = (await session.execute(stmt)).first()
+            watchdog_stmt = (
+                select(Reading.date)
+                .where(Reading.date < before_date)
+                .order_by(desc(Reading.date))
+                .limit(1)
+            )
+        row = (await session.execute(trusted_stmt)).first()
+        watchdog_row = (await session.execute(watchdog_stmt)).first()
     if row is None or row.litres_remaining is None or row.air_gap_cm is None:
         return None
     try:
         ts = datetime.strptime(row.date, "%Y-%m-%d %H:%M:%S")
     except ValueError:
         return None
+    watchdog_ts: datetime | None = None
+    if watchdog_row is not None and watchdog_row.date != row.date:
+        try:
+            watchdog_ts = datetime.strptime(
+                watchdog_row.date, "%Y-%m-%d %H:%M:%S"
+            )
+        except ValueError:
+            watchdog_ts = None
     return PreviousReading(
         date=ts,
         litres_remaining=float(row.litres_remaining),
         air_gap_cm=float(row.air_gap_cm),
+        most_recent_date=watchdog_ts,
     )
 
 

@@ -340,6 +340,30 @@ def test_sanity_bound_keeps_raw_depth_and_litres_honest() -> None:
     assert result["litres_remaining"] < 400.0  # ~329, sensor-reported
 
 
+def test_sanity_bound_applies_when_trusted_is_old_but_sensor_in_cadence() -> None:
+    """After several chain-noise rows, the most recent TRUSTED reading
+    can be hours old even though the sensor has been broadcasting
+    normally every 30 min. The sanity bound must still apply — the
+    max-gap watchdog is for genuine outages, not chains of suppressed
+    readings.
+    """
+    trusted_dt = datetime(2026, 5, 28, 16, 10, 0)
+    most_recent_dt = datetime(2026, 5, 28, 19, 10, 0)
+    curr_dt = datetime(2026, 5, 28, 19, 40, 0)
+    payload = _payload(when=curr_dt, depth_cm=94.0, temp_c=20.0)
+    prev = PreviousReading(
+        date=trusted_dt,
+        litres_remaining=520.0,
+        air_gap_cm=80.0,
+        most_recent_date=most_recent_dt,
+    )
+
+    result = process(payload, _ctx(), previous=prev)
+
+    assert result["leak_detected"] == "n"
+    assert "noise_suppressed" in str(result["raw_flags"] or "")
+
+
 def test_sanity_bound_catches_60min_plus_jitter() -> None:
     # Real-world cadence: sensor broadcasts every ~30 min, occasionally
     # missing one. The gap-to-previous then lands at ~3601 s (60 min +
