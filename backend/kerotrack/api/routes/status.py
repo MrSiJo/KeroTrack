@@ -33,10 +33,16 @@ async def get_status(request: Request) -> dict[str, Any]:
                 .limit(1)
             )
         ).scalar_one_or_none()
+        # Order by when the analysis was COMPUTED, not by which reading
+        # it covers — once we started skipping noise_suppressed rows for
+        # the "latest reading", a freshly-computed analysis row can have
+        # a slightly older `latest_reading_date` than a stale row that
+        # was based on a noisy reading. The most recently computed view
+        # is always the one we want.
         latest_analysis = (
             await session.execute(
                 select(AnalysisResult)
-                .order_by(desc(AnalysisResult.latest_reading_date))
+                .order_by(desc(AnalysisResult.latest_analysis_date))
                 .limit(1)
             )
         ).scalar_one_or_none()

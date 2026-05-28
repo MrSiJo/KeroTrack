@@ -24,7 +24,7 @@ async def latest(request: Request) -> dict[str, Any]:
         row = (
             await session.execute(
                 select(AnalysisResult)
-                .order_by(desc(AnalysisResult.latest_reading_date))
+                .order_by(desc(AnalysisResult.latest_analysis_date))
                 .limit(1)
             )
         ).scalar_one_or_none()
