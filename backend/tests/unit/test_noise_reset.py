@@ -86,9 +86,13 @@ async def test_resets_implausible_short_interval_y_flags(sf) -> None:
         rows = (await session.execute(select(Reading).order_by(Reading.date))).scalars().all()
     assert all(r.refill_detected == "n" for r in rows)
     assert all(r.leak_detected == "n" for r in rows)
-    # Sentinel stamped on the affected rows so the UI can render them differently.
+    # The noisy 100 cm row is sentinel-stamped — its litres/air_gap don't
+    # represent reality and downstream walkers must skip it.
     assert "noise_suppressed" in (rows[1].raw_flags or "")
-    assert "noise_suppressed" in (rows[2].raw_flags or "")
+    # The third row's raw values match the trusted baseline (back at 80 cm,
+    # 520 L) — the 'refill_detected=y' was a spurious "return to truth"
+    # flag. Its flag is cleared but the row stays as honest data.
+    assert "noise_suppressed" not in (rows[2].raw_flags or "")
     # Unaffected baseline row stays untouched.
     assert "noise_suppressed" not in (rows[0].raw_flags or "")
 
@@ -110,6 +114,38 @@ async def test_preserves_legitimate_long_interval_refill(sf) -> None:
     async with sf() as session:
         rows = (await session.execute(select(Reading).order_by(Reading.date))).scalars().all()
     assert rows[1].refill_detected == "y"
+
+
+@pytest.mark.asyncio
+async def test_chains_through_noise_to_last_trusted_baseline(sf) -> None:
+    """The Watchman Sonic can lock onto a wrong reflection for several
+    readings in a row. Consecutive readings at the same wrong value have
+    a small per-pair delta, so the bound never trips on the chain itself.
+    Reset must compare each reading against the last NON-noise baseline,
+    not the immediately previous row, so the whole chain gets marked.
+    """
+    t0 = datetime(2026, 5, 28, 14, 0, 0)
+    await _seed(sf, [
+        _r(t0, air_gap_cm=80.0, litres=520.0),
+        _r(t0 + timedelta(minutes=30), air_gap_cm=93.0, litres=391.0, leak="y"),
+        # Chain — already flagged 'n' but at the wrong value. Per-pair
+        # delta from 93→93 is tiny, but vs. trusted 80 baseline it's huge.
+        _r(t0 + timedelta(minutes=60), air_gap_cm=93.0, litres=391.0),
+        _r(t0 + timedelta(minutes=90), air_gap_cm=93.0, litres=391.0),
+        _r(t0 + timedelta(minutes=120), air_gap_cm=80.0, litres=520.0),
+    ])
+    svc = SettingsService(sf)
+
+    await reset_noise_flags(sf, svc, apply=True)
+
+    async with sf() as session:
+        rows = (await session.execute(select(Reading).order_by(Reading.date))).scalars().all()
+    # The 3 noisy 93-cm rows should all carry the sentinel, regardless of
+    # whether their original flag was 'y' or 'n'.
+    chain = [r for r in rows if r.air_gap_cm == 93.0]
+    assert len(chain) == 3
+    assert all("noise_suppressed" in (r.raw_flags or "") for r in chain), \
+        [(r.date, r.raw_flags) for r in chain]
 
 
 @pytest.mark.asyncio

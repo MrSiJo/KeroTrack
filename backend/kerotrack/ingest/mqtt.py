@@ -34,22 +34,36 @@ logger = logging.getLogger(__name__)
 async def _load_previous(
     sf: async_sessionmaker, *, before_date: str | None = None
 ) -> PreviousReading | None:
-    """Fetch the most recent reading strictly before `before_date`.
+    """Fetch the most recent TRUSTED reading strictly before `before_date`.
 
-    When ingest first lands a brand-new payload, `before_date` is the new
-    payload's timestamp; without this filter we would compare against rows
-    AT or AFTER that timestamp (e.g. duplicate upserts, or already-migrated
-    rows that share the same minute). That collapses
+    Trusted = not stamped with the `noise_suppressed` sentinel in
+    `raw_flags`. Chaining through noisy rows is what stops the Watchman
+    Sonic's "stuck-at-wrong-reflection" chain from leaking past the
+    sanity bound: when the sensor reports 80 → 100 → 100 → 100 → 80,
+    every 100-cm reading compares against the trusted 80 cm baseline
+    instead of the immediately previous (also-noisy) 100 cm row, so the
+    whole chain gets marked.
+
+    When ingest first lands a brand-new payload, `before_date` is the
+    new payload's timestamp; without this filter we would compare
+    against rows AT or AFTER that timestamp (e.g. duplicate upserts, or
+    already-migrated rows that share the same minute). That collapses
     `litres_used_since_last` to 0 for every recurrence.
     """
+    noise_clause = (Reading.raw_flags.is_(None)) | (
+        ~Reading.raw_flags.like("%noise_suppressed%")
+    )
     async with sf() as session:
-        stmt = select(
-            Reading.date, Reading.litres_remaining, Reading.air_gap_cm
-        ).order_by(desc(Reading.date)).limit(1)
+        stmt = (
+            select(Reading.date, Reading.litres_remaining, Reading.air_gap_cm)
+            .where(noise_clause)
+            .order_by(desc(Reading.date))
+            .limit(1)
+        )
         if before_date is not None:
             stmt = (
                 select(Reading.date, Reading.litres_remaining, Reading.air_gap_cm)
-                .where(Reading.date < before_date)
+                .where(Reading.date < before_date, noise_clause)
                 .order_by(desc(Reading.date))
                 .limit(1)
             )

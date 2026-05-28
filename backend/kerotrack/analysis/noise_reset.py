@@ -86,28 +86,49 @@ async def reset_noise_flags(
             .all()
         )
 
+    # `trusted` = the most recent row we believe represents reality. The
+    # sanity bound compares every candidate against `trusted`, not the
+    # immediately preceding row. This lets the cleanup mark chain noise
+    # (the sensor stuck on a wrong reflection for N consecutive readings)
+    # because each chain member's delta from the last trusted baseline is
+    # huge even though its delta from the immediately previous (noisy)
+    # row is tiny. `trusted` is only advanced when the candidate clears
+    # the bound (or when the bound doesn't apply, e.g. multi-hour gaps).
     affected: list[dict[str, Any]] = []
+    spurious_flag_dates: list[str] = []
+    # Two-pointer walk:
+    #   `prev`     = most recent reading regardless of noise. Used to
+    #                detect outage gaps that disable the bound.
+    #   `trusted`  = most recent reading we believe represents reality.
+    #                The bound delta is measured against this.
     prev: Reading | None = None
+    trusted: Reading | None = None
     for curr in rows:
-        if prev is None:
+        if trusted is None or prev is None:
+            trusted = curr
             prev = curr
             continue
-        if curr.refill_detected != "y" and curr.leak_detected != "y":
+        if (
+            curr.air_gap_cm is None
+            or curr.temperature is None
+            or trusted.air_gap_cm is None
+        ):
+            trusted = curr
             prev = curr
             continue
+        trusted_dt = parse_local(trusted.date)
         prev_dt = parse_local(prev.date)
         curr_dt = parse_local(curr.date)
-        if (
-            prev_dt is None
-            or curr_dt is None
-            or prev.air_gap_cm is None
-            or curr.air_gap_cm is None
-            or curr.temperature is None
-        ):
+        if trusted_dt is None or prev_dt is None or curr_dt is None:
+            trusted = curr
             prev = curr
             continue
-        interval_s = (curr_dt - prev_dt).total_seconds()
-        if not (0 < interval_s <= SANITY_BOUND_MAX_GAP_HOURS * 3600):
+        gap_from_prev_s = (curr_dt - prev_dt).total_seconds()
+        interval_s = (curr_dt - trusted_dt).total_seconds()
+        # Long real gap (outage) → reset baseline. Anything could have
+        # happened during the gap, including a delivery.
+        if not (0 < gap_from_prev_s <= SANITY_BOUND_MAX_GAP_HOURS * 3600):
+            trusted = curr
             prev = curr
             continue
         bound = _physical_change_bound_l(
@@ -125,43 +146,61 @@ async def reset_noise_flags(
             height_cm=snap["tank_height_cm"],
             capacity_l=snap["tank_capacity_l"],
         )
-        prev_raw = _raw_air_gap_litres(
-            air_gap_cm=float(prev.air_gap_cm),
+        trusted_raw = _raw_air_gap_litres(
+            air_gap_cm=float(trusted.air_gap_cm),
             height_cm=snap["tank_height_cm"],
             capacity_l=snap["tank_capacity_l"],
         )
-        if abs(curr_raw - prev_raw) > bound:
+        if abs(curr_raw - trusted_raw) > bound:
             affected.append(
                 {
                     "date": curr.date,
                     "interval_minutes": round(interval_s / 60, 1),
-                    "prev_air_gap_cm": float(prev.air_gap_cm),
+                    "prev_air_gap_cm": float(trusted.air_gap_cm),
                     "curr_air_gap_cm": float(curr.air_gap_cm),
-                    "delta_raw_l": round(curr_raw - prev_raw, 1),
+                    "delta_raw_l": round(curr_raw - trusted_raw, 1),
                     "bound_l": round(bound, 1),
                     "was_refill": curr.refill_detected == "y",
                     "was_leak": curr.leak_detected == "y",
                 }
             )
+            # Do NOT advance `trusted` — the chain stays compared
+            # against the last good baseline. But advance `prev` so the
+            # max-gap watchdog tracks the actual sample cadence.
+            prev = curr
+            continue
+        # Within budget and matching trusted. If this row is currently
+        # flagged 'y' it must be a spurious "return to truth" — the live
+        # refill/leak detection fired against the bad immediately-prior
+        # reading rather than the trusted baseline. Clear the flag (no
+        # sentinel: the row's litres/air_gap are honest).
+        if curr.refill_detected == "y" or curr.leak_detected == "y":
+            spurious_flag_dates.append(curr.date)
+        trusted = curr
         prev = curr
 
-    if apply and affected:
+    if apply:
         affected_dates = {a["date"] for a in affected}
-        async with sf() as session:
-            target_rows = (
-                (
-                    await session.execute(
-                        select(Reading).where(Reading.date.in_(affected_dates))
+        spurious_dates = set(spurious_flag_dates)
+        if affected_dates or spurious_dates:
+            async with sf() as session:
+                target_rows = (
+                    (
+                        await session.execute(
+                            select(Reading).where(
+                                Reading.date.in_(affected_dates | spurious_dates)
+                            )
+                        )
                     )
+                    .scalars()
+                    .all()
                 )
-                .scalars()
-                .all()
-            )
-            for row in target_rows:
-                row.refill_detected = "n"
-                row.leak_detected = "n"
-                row.raw_flags = _stamp_sentinel(row.raw_flags)
-            await session.commit()
+                for row in target_rows:
+                    row.refill_detected = "n"
+                    row.leak_detected = "n"
+                    if row.date in affected_dates:
+                        row.raw_flags = _stamp_sentinel(row.raw_flags)
+                await session.commit()
 
     # Clean up refill_periods rows whose end_date no longer corresponds
     # to a refill_detected='y' reading. Skip operator-curated rows
@@ -207,8 +246,11 @@ async def reset_noise_flags(
 
     return {
         "apply": apply,
-        "reset_count": len(affected),
+        "reset_count": len(affected) + len(spurious_flag_dates),
+        "noise_count": len(affected),
+        "spurious_flag_count": len(spurious_flag_dates),
         "sample": affected[:50],
+        "spurious_flag_sample": spurious_flag_dates[:50],
         "periods_deleted": len(orphan_periods),
         "periods_deleted_sample": orphan_periods[:50],
     }
