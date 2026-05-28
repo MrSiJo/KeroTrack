@@ -224,6 +224,19 @@ def _entries() -> list[SettingDef]:
             "Leak rate (L/day)",
             10.0,
         ),
+        SettingDef(
+            "detection.sanity_safety_multiplier",
+            "float",
+            "detection",
+            "Sanity-bound safety multiplier",
+            2.0,
+            description=(
+                "Multiplier applied to the max-daily-consumption budget when "
+                "deciding whether an inter-reading Δlitres is physically "
+                "plausible. Lower = tighter (more spike suppression); higher "
+                "= looser (only the largest spikes are caught)."
+            ),
+        ),
     ]
 
     # mqtt ---------------------------------------------------------------

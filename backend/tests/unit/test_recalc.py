@@ -73,6 +73,10 @@ def _ctx(**overrides) -> RecalcContext:
         refill_threshold_l=100.0,
         leak_threshold_l=100.0,
         leak_rate_per_day_l=10.0,
+        max_daily_consumption_warm_l=30.0,
+        max_daily_consumption_cold_l=55.0,
+        warm_temperature_threshold_c=16.0,
+        sanity_safety_multiplier=2.0,
         current_ppl=78.5,
     )
     base.update(overrides)
@@ -252,3 +256,130 @@ def test_refill_detection_after_dip_and_top_up() -> None:
 def test_first_reading_has_zero_used() -> None:
     result = process(FIXTURES["canonical"], _ctx(), previous=None)
     assert result["litres_used_since_last"] == 0.0
+
+
+# --------------------------------------------------------------------
+# Sanity-bound: suppress refill/leak flags on physically-impossible
+# deltas (Watchman Sonic multipath misreads in warm weather).
+# --------------------------------------------------------------------
+
+
+def _payload(*, when: datetime, depth_cm: float, temp_c: float, status: int = 144) -> dict:
+    """Build a Watchman Sonic-shaped RTL_433 payload for a given time/depth/temp."""
+    return {
+        "time": when.strftime("%Y-%m-%d %H:%M:%S"),
+        "id": "12345",
+        "model": "Oil-SonicSmart",
+        "depth_cm": depth_cm,
+        "temperature_C": temp_c,
+        "status": status,
+    }
+
+
+def _prev_at(when: datetime, *, air_gap_cm: float, litres_remaining: float) -> PreviousReading:
+    return PreviousReading(
+        date=when,
+        litres_remaining=litres_remaining,
+        air_gap_cm=air_gap_cm,
+    )
+
+
+def test_sanity_bound_suppresses_false_leak_on_30min_spike() -> None:
+    # The exact pattern from May 22-28 2026: prev reading at 80 cm ~520L,
+    # next reading 30 min later at 100 cm ~329L (178 L "loss"). Warm.
+    prev_dt = datetime(2026, 5, 24, 12, 9, 38)
+    curr_dt = prev_dt + timedelta(minutes=30)
+    payload = _payload(when=curr_dt, depth_cm=100.0, temp_c=23.0)
+    prev = _prev_at(prev_dt, air_gap_cm=80.0, litres_remaining=520.0)
+
+    result = process(payload, _ctx(), previous=prev)
+
+    assert result["leak_detected"] == "n"
+    assert result["refill_detected"] == "n"
+
+
+def test_sanity_bound_suppresses_false_refill_on_30min_dip() -> None:
+    # Opposite half of the oscillation: prev at 100 cm ~329L, next at 80 cm ~520L.
+    prev_dt = datetime(2026, 5, 24, 12, 39, 38)
+    curr_dt = prev_dt + timedelta(minutes=30)
+    payload = _payload(when=curr_dt, depth_cm=80.0, temp_c=23.0)
+    prev = _prev_at(prev_dt, air_gap_cm=100.0, litres_remaining=329.0)
+
+    result = process(payload, _ctx(), previous=prev)
+
+    assert result["refill_detected"] == "n"
+    assert result["leak_detected"] == "n"
+
+
+def test_sanity_bound_marks_noise_in_raw_flags() -> None:
+    prev_dt = datetime(2026, 5, 24, 12, 9, 38)
+    curr_dt = prev_dt + timedelta(minutes=30)
+    payload = _payload(when=curr_dt, depth_cm=100.0, temp_c=23.0, status=144)
+    prev = _prev_at(prev_dt, air_gap_cm=80.0, litres_remaining=520.0)
+
+    result = process(payload, _ctx(), previous=prev)
+
+    # Original status byte preserved, sentinel appended so UI can flag the row.
+    assert "noise_suppressed" in str(result["raw_flags"])
+    assert "144" in str(result["raw_flags"])
+
+
+def test_sanity_bound_keeps_raw_depth_and_litres_honest() -> None:
+    # Even when we suppress the flags, the persisted depth/air_gap/litres
+    # must reflect what the sensor actually reported — we don't want to lose
+    # signal that there's noise upstream.
+    prev_dt = datetime(2026, 5, 24, 12, 9, 38)
+    curr_dt = prev_dt + timedelta(minutes=30)
+    payload = _payload(when=curr_dt, depth_cm=100.0, temp_c=23.0)
+    prev = _prev_at(prev_dt, air_gap_cm=80.0, litres_remaining=520.0)
+
+    result = process(payload, _ctx(), previous=prev)
+
+    assert result["air_gap_cm"] == 100.0
+    assert result["oil_depth_cm"] == 37.0  # 137 - 100
+    assert result["litres_remaining"] < 400.0  # ~329, sensor-reported
+
+
+def test_sanity_bound_skipped_when_interval_exceeds_max_gap() -> None:
+    # First reading after a multi-hour gap — sensor offline, settings page open
+    # during a refill, whatever. We have no idea what happened, so a 800 L
+    # rise across a 21 h gap is a real refill, not a spike to suppress.
+    prev_dt = datetime(2026, 4, 30, 12, 0, 0)
+    curr_dt = prev_dt + timedelta(hours=21)
+    payload = _payload(when=curr_dt, depth_cm=20.0, temp_c=14.0)
+    prev = _prev_at(prev_dt, air_gap_cm=110.0, litres_remaining=200.0)
+
+    result = process(payload, _ctx(), previous=prev)
+
+    assert result["refill_detected"] == "y"
+    assert "noise_suppressed" not in str(result["raw_flags"] or "")
+
+
+def test_sanity_bound_allows_modest_consumption_within_budget() -> None:
+    # Tight ×2 budget: cold 30 min budget ≈ 2.3 L. A 0.1 cm air-gap rise
+    # (~0.9 L drop) is well within that — must not trip the sanity sentinel.
+    prev_dt = datetime(2026, 1, 15, 8, 0, 0)
+    curr_dt = prev_dt + timedelta(minutes=30)
+    payload = _payload(when=curr_dt, depth_cm=80.1, temp_c=5.0)
+    prev = _prev_at(prev_dt, air_gap_cm=80.0, litres_remaining=520.0)
+
+    result = process(payload, _ctx(), previous=prev)
+
+    assert "noise_suppressed" not in str(result["raw_flags"] or "")
+    assert result["leak_detected"] == "n"
+    assert result["refill_detected"] == "n"
+
+
+def test_sanity_bound_allows_single_cm_consumption_tick() -> None:
+    # The sensor reports air gap as an integer cm. A real consumption
+    # "tick" therefore shows up as a 1 cm jump (~9 L on this tank). That
+    # must clear the bound — otherwise winter consumption gets eaten by
+    # noise suppression.
+    prev_dt = datetime(2026, 1, 15, 8, 0, 0)
+    curr_dt = prev_dt + timedelta(minutes=30)
+    payload = _payload(when=curr_dt, depth_cm=81.0, temp_c=5.0)
+    prev = _prev_at(prev_dt, air_gap_cm=80.0, litres_remaining=520.0)
+
+    result = process(payload, _ctx(), previous=prev)
+
+    assert "noise_suppressed" not in str(result["raw_flags"] or "")

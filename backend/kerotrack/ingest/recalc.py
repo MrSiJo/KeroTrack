@@ -61,6 +61,15 @@ class RecalcContext:
     refill_threshold_l: float
     leak_threshold_l: float
     leak_rate_per_day_l: float
+    # Sanity-bound inputs — used to suppress refill/leak flags on
+    # physically-impossible inter-reading deltas (Watchman Sonic multipath
+    # misreads in warm/humid weather). The bound is:
+    #     max_daily_l × interval_days × safety_multiplier
+    # where max_daily_l switches on `warm_temperature_threshold_c`.
+    max_daily_consumption_warm_l: float = 30.0
+    max_daily_consumption_cold_l: float = 55.0
+    warm_temperature_threshold_c: float = 16.0
+    sanity_safety_multiplier: float = 2.0
     current_ppl: float | None = None
 
 
@@ -117,6 +126,71 @@ def detect_refill(
     volume_increase = current_litres - previous_litres
     air_gap_decrease = previous_air_gap - current_air_gap
     return "y" if volume_increase >= threshold_l and air_gap_decrease > 5 else "n"
+
+
+NOISE_SUPPRESSED_SENTINEL = "noise_suppressed"
+# Inter-reading gaps longer than this disable the sanity bound. The
+# Watchman Sonic broadcasts every ~30 min in normal operation, so a gap
+# of a few hours means we lost samples (or the unit was offline) and the
+# delta could legitimately reflect a refill / outage event. Only spikes
+# at the normal cadence are sensor multipath misreads.
+SANITY_BOUND_MAX_GAP_HOURS = 1.0
+# The Watchman Sonic Advanced reports air gap as an integer cm. A single
+# real-consumption "tick" therefore looks like a 1 cm jump (~9 L on a
+# 1225 L tank). We allow 2 cm of slack to absorb that quantisation plus a
+# small amount of jitter — anything beyond is multipath. Expressed as the
+# air-gap-derived raw volume; the consumption-budget gate above only
+# tightens the bound when the gap is long enough for daily-rate to apply.
+SANITY_BOUND_MIN_AIR_GAP_CM = 2.0
+
+
+def _raw_air_gap_litres(
+    *, air_gap_cm: float, height_cm: float, capacity_l: float
+) -> float:
+    """Convert an air-gap reading to litres without thermal compensation.
+
+    The sanity-bound check needs to compare prev/current on the same
+    basis, so we ignore the thermal correction here — otherwise a 10 °C
+    swing between readings produces a 5 L "delta" at constant depth.
+    """
+    if height_cm <= 0:
+        return 0.0
+    oil_height = max(0.0, height_cm - air_gap_cm)
+    return (oil_height / height_cm) * capacity_l
+
+
+def _physical_change_bound_l(
+    *,
+    interval_seconds: float,
+    current_temperature_c: float,
+    max_warm_l_per_day: float,
+    max_cold_l_per_day: float,
+    warm_threshold_c: float,
+    safety_multiplier: float,
+    capacity_l: float,
+    height_cm: float,
+) -> float:
+    """Maximum plausible raw |Δlitres| between two readings.
+
+    Larger of two terms: (a) the daily-consumption budget pro-rated to
+    the interval × safety_multiplier — meaningful at longer gaps; and
+    (b) a sensor-quantisation floor (`SANITY_BOUND_MIN_AIR_GAP_CM`) so
+    one cm of integer-rounded depth jitter at the normal 30-min cadence
+    doesn't trip the bound.
+    """
+    max_per_day = (
+        max_warm_l_per_day
+        if current_temperature_c >= warm_threshold_c
+        else max_cold_l_per_day
+    )
+    interval_days = max(interval_seconds, 0.0) / 86400.0
+    budget = max_per_day * interval_days * safety_multiplier
+    quantum_floor = (
+        (capacity_l / height_cm) * SANITY_BOUND_MIN_AIR_GAP_CM
+        if height_cm > 0
+        else 0.0
+    )
+    return max(budget, quantum_floor)
 
 
 def detect_leak(
@@ -211,6 +285,61 @@ def process(
         else "0.00"
     )
 
+    refill_flag = detect_refill(
+        current_litres,
+        prev_litres,
+        current_air_gap,
+        prev_air_gap,
+        threshold_l=ctx.refill_threshold_l,
+    )
+    leak_flag = detect_leak(
+        current_litres,
+        prev_litres,
+        current_date,
+        prev_date,
+        threshold_l=ctx.leak_threshold_l,
+        leak_rate_per_day_l=ctx.leak_rate_per_day_l,
+    )
+    raw_flags: Any = reading.get("status")
+
+    # Sanity bound: Watchman Sonic Advanced locks onto secondary reflections
+    # in hot weather, producing 30-min depth jumps far beyond any plausible
+    # consumption rate. The raw depth is recorded as-sensed, but the derived
+    # refill/leak flags are suppressed so downstream analysis (refill anchor,
+    # weekly digest) isn't poisoned. A sentinel is appended to raw_flags so
+    # the row is recognisable in audits and in the UI.
+    if prev_air_gap is not None and prev_date is not None:
+        interval_s = (current_date - prev_date).total_seconds()
+        if 0 < interval_s <= SANITY_BOUND_MAX_GAP_HOURS * 3600:
+            bound = _physical_change_bound_l(
+                interval_seconds=interval_s,
+                current_temperature_c=current_temp,
+                max_warm_l_per_day=ctx.max_daily_consumption_warm_l,
+                max_cold_l_per_day=ctx.max_daily_consumption_cold_l,
+                warm_threshold_c=ctx.warm_temperature_threshold_c,
+                safety_multiplier=ctx.sanity_safety_multiplier,
+                capacity_l=ctx.tank_capacity_l,
+                height_cm=ctx.tank_height_cm,
+            )
+            curr_raw_l = _raw_air_gap_litres(
+                air_gap_cm=current_air_gap,
+                height_cm=ctx.tank_height_cm,
+                capacity_l=ctx.tank_capacity_l,
+            )
+            prev_raw_l = _raw_air_gap_litres(
+                air_gap_cm=prev_air_gap,
+                height_cm=ctx.tank_height_cm,
+                capacity_l=ctx.tank_capacity_l,
+            )
+            if abs(curr_raw_l - prev_raw_l) > bound:
+                refill_flag = "n"
+                leak_flag = "n"
+                raw_flags = (
+                    f"{raw_flags}:{NOISE_SUPPRESSED_SENTINEL}"
+                    if raw_flags is not None
+                    else NOISE_SUPPRESSED_SENTINEL
+                )
+
     return {
         "date": current_date.strftime("%Y-%m-%d %H:%M:%S"),
         "id": reading["id"],
@@ -225,22 +354,9 @@ def process(
         "cost_to_fill": cost_to_fill,
         "heating_degree_days": calculate_hdd(current_temp, ctx.hdd_base_temperature),
         "seasonal_efficiency": calculate_seasonal_efficiency(current_date.month),
-        "refill_detected": detect_refill(
-            current_litres,
-            prev_litres,
-            current_air_gap,
-            prev_air_gap,
-            threshold_l=ctx.refill_threshold_l,
-        ),
-        "leak_detected": detect_leak(
-            current_litres,
-            prev_litres,
-            current_date,
-            prev_date,
-            threshold_l=ctx.leak_threshold_l,
-            leak_rate_per_day_l=ctx.leak_rate_per_day_l,
-        ),
-        "raw_flags": reading.get("status"),
+        "refill_detected": refill_flag,
+        "leak_detected": leak_flag,
+        "raw_flags": raw_flags,
         "litres_to_order": round(ctx.tank_capacity_l - current_litres, 1),
         "bars_remaining": bars_remaining,
     }
@@ -272,5 +388,17 @@ async def context_from_settings(
         refill_threshold_l=float(await g("detection.refill_threshold_l")),
         leak_threshold_l=float(await g("detection.leak_threshold_l")),
         leak_rate_per_day_l=float(await g("detection.leak_rate_per_day_l")),
+        max_daily_consumption_warm_l=float(
+            await g("detection.max_daily_consumption_warm_l")
+        ),
+        max_daily_consumption_cold_l=float(
+            await g("detection.max_daily_consumption_cold_l")
+        ),
+        warm_temperature_threshold_c=float(
+            await g("detection.warm_temperature_threshold_c")
+        ),
+        sanity_safety_multiplier=float(
+            await g("detection.sanity_safety_multiplier")
+        ),
         current_ppl=current_ppl,
     )

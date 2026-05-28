@@ -333,6 +333,33 @@ async def _import_ons_prices(args: argparse.Namespace) -> int:
     return await _with_session(_do)
 
 
+async def _reset_noise_flags(args: argparse.Namespace) -> int:
+    """Reset refill/leak flags on rows where the inter-reading delta
+    exceeds the live sanity bound (Watchman Sonic multipath misreads)."""
+    from kerotrack.analysis.noise_reset import reset_noise_flags
+
+    async def _do(sf):
+        svc = SettingsService(sf)
+        report = await reset_noise_flags(sf, svc, apply=args.apply)
+        print(json.dumps(report, indent=2, default=str))
+        return 0
+
+    if args.src_db:
+        boot = get_bootstrap()
+        src_path = Path(args.src_db).resolve()
+        url = f"sqlite+aiosqlite:///{src_path.as_posix()}"
+        engine = init_engine(url)
+        await ensure_schema(engine)
+        sf = session_factory(engine)
+        async with sf() as session:
+            await seed_defaults(session)
+        try:
+            return await _do(sf)
+        finally:
+            await engine.dispose()
+    return await _with_session(_do)
+
+
 async def _rebuild_costs(args: argparse.Namespace) -> int:
     """Rebuild refill_periods using the PPL resolver. Default is dry-run.
 
@@ -478,6 +505,26 @@ def _build_parser() -> argparse.ArgumentParser:
         "--csv", required=True, help="Path to series-XXXXX.csv from ONS"
     )
     ons.set_defaults(func=_import_ons_prices)
+
+    reset_noise = sub.add_parser(
+        "reset-noise-flags",
+        help=(
+            "Replay the live sanity bound across historical readings and "
+            "clear refill_detected / leak_detected flags on rows whose "
+            "inter-reading delta is physically implausible. Read-only by "
+            "default; pass --apply to write."
+        ),
+    )
+    reset_noise.add_argument(
+        "--src-db",
+        help="Run against an alternative DB path (snapshot copy).",
+    )
+    reset_noise.add_argument(
+        "--apply",
+        action="store_true",
+        help="Persist changes. Without this, prints a dry-run report only.",
+    )
+    reset_noise.set_defaults(func=_reset_noise_flags)
 
     rebuild = sub.add_parser(
         "rebuild-costs",
