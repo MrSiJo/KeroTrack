@@ -18,9 +18,19 @@ router = APIRouter(prefix="/api/status", tags=["status"])
 async def get_status(request: Request) -> dict[str, Any]:
     sf = request.app.state.session_factory
     async with sf() as session:
+        # Dashboard gauge reads `reading.percentage_remaining` / litres
+        # directly, so the latest TRUSTED row is what we want — a
+        # noise-suppressed row's bad litres value would otherwise show
+        # up as the current tank level.
         latest_reading = (
             await session.execute(
-                select(Reading).order_by(desc(Reading.date)).limit(1)
+                select(Reading)
+                .where(
+                    (Reading.raw_flags.is_(None))
+                    | (~Reading.raw_flags.like("%noise_suppressed%"))
+                )
+                .order_by(desc(Reading.date))
+                .limit(1)
             )
         ).scalar_one_or_none()
         latest_analysis = (

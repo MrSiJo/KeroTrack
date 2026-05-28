@@ -122,10 +122,19 @@ def _hot_water_baseline_l_per_day(fuel_rate_l_per_h: float) -> float:
 
 
 async def _latest_reading(sf: async_sessionmaker) -> Reading | None:
+    """Most recent TRUSTED reading — skips noise_suppressed rows so
+    `total_consumption_since_refill` and the windowed deltas don't
+    anchor to a sensor multipath spike."""
     async with sf() as session:
         return (
             await session.execute(
-                select(Reading).order_by(desc(Reading.date)).limit(1)
+                select(Reading)
+                .where(
+                    (Reading.raw_flags.is_(None))
+                    | (~Reading.raw_flags.like("%noise_suppressed%"))
+                )
+                .order_by(desc(Reading.date))
+                .limit(1)
             )
         ).scalar_one_or_none()
 
