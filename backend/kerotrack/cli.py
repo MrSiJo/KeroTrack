@@ -360,6 +360,19 @@ async def _reset_noise_flags(args: argparse.Namespace) -> int:
     return await _with_session(_do)
 
 
+async def _prune_raw(args: argparse.Namespace) -> int:
+    """Delete raw_captures rows older than --before. Default is dry-run;
+    pass --apply to delete."""
+    from kerotrack.ingest.raw_capture import prune_raw_captures
+
+    async def _do(sf):
+        report = await prune_raw_captures(sf, before=args.before, apply=args.apply)
+        print(json.dumps(report, indent=2, default=str))
+        return 0
+
+    return await _with_session(_do)
+
+
 async def _rebuild_costs(args: argparse.Namespace) -> int:
     """Rebuild refill_periods using the PPL resolver. Default is dry-run.
 
@@ -552,6 +565,25 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Print a slim before/after summary instead of full payloads",
     )
     rebuild.set_defaults(func=_rebuild_costs)
+
+    prune_raw = sub.add_parser(
+        "prune-raw",
+        help=(
+            "Delete raw_captures rows with received_at before --before "
+            "(YYYY-MM-DD). Read-only by default; pass --apply to delete."
+        ),
+    )
+    prune_raw.add_argument(
+        "--before",
+        required=True,
+        help="Delete rows captured before this date (YYYY-MM-DD).",
+    )
+    prune_raw.add_argument(
+        "--apply",
+        action="store_true",
+        help="Persist deletion. Without this, prints a dry-run count only.",
+    )
+    prune_raw.set_defaults(func=_prune_raw)
 
     return parser
 

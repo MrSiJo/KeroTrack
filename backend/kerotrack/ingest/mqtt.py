@@ -18,6 +18,7 @@ import aiomqtt
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from kerotrack.ingest.raw_capture import persist_raw_capture
 from kerotrack.ingest.recalc import (
     PreviousReading,
     RecalcContext,
@@ -165,12 +166,14 @@ async def handle_payload(
     pubsub: PubSubBus,
     ctx_override: RecalcContext | None = None,
     price_provider=None,
+    topic: str | None = None,
 ) -> dict[str, Any]:
     """Process one inbound Watchman Sonic JSON and fan out the result.
 
     `price_provider` is an awaitable returning the current pence-per-litre
     (cached, with stale-fallback). Tests pass None and rely on
-    `ctx_override`.
+    `ctx_override`. `topic` is the source MQTT topic, recorded with the raw
+    capture.
     """
     payload = _normalise_payload(raw)
     if payload.get("model") not in {"Oil-SonicSmart", "Oil-SonicAdv"}:
@@ -193,6 +196,14 @@ async def handle_payload(
     previous = await _load_previous(sf, before_date=new_date)
     processed = process(payload, ctx, previous=previous)
     await _persist_reading(sf, processed)
+    # Archive the verbatim payload alongside the reading. Best-effort: a
+    # capture failure must never lose the reading or block the publish.
+    try:
+        await persist_raw_capture(
+            sf, raw, topic=topic, sensor_time=processed["date"]
+        )
+    except Exception:  # noqa: BLE001
+        logger.warning("raw capture failed", exc_info=True)
     await publisher.publish_level(processed)
     await pubsub.publish("reading", processed)
     return processed
@@ -372,6 +383,7 @@ class MqttIngest:
                     publisher=self.publisher,
                     pubsub=self._pubsub,
                     price_provider=self._price_provider,
+                    topic=str(msg.topic),
                 )
             except Exception:  # noqa: BLE001
                 logger.exception("error handling MQTT message")

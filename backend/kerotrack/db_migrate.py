@@ -21,6 +21,7 @@ from kerotrack.models.base import Base
 from kerotrack.models import setting as _setting  # noqa: F401
 from kerotrack.models import setting_change as _setting_change  # noqa: F401
 from kerotrack.models import reading as _reading  # noqa: F401
+from kerotrack.models import raw_capture as _raw_capture  # noqa: F401
 from kerotrack.models import analysis_result as _ar  # noqa: F401
 from kerotrack.models import refill as _refill  # noqa: F401
 from kerotrack.models import refill_period as _rp  # noqa: F401
