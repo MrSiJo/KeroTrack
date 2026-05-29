@@ -117,6 +117,29 @@ async def test_preserves_legitimate_long_interval_refill(sf) -> None:
 
 
 @pytest.mark.asyncio
+async def test_resets_drop_when_gap_exceeds_max_but_baseline_alive(sf) -> None:
+    # The May 29 2026 phantom: two missed broadcasts put the gap to the
+    # previous row at 1.5 h (> SANITY_BOUND_MAX_GAP_HOURS). The old gate
+    # reset the baseline and left the leak flag untouched. A *drop* can't
+    # beat the consumption budget at any gap, so the cleaner must still
+    # mark it. (Contrast test_preserves_legitimate_long_interval_refill —
+    # a long-gap RISE is still trusted as a real delivery.)
+    t0 = datetime(2026, 5, 29, 7, 40, 16)
+    await _seed(sf, [
+        _r(t0, air_gap_cm=80.0, litres=510.5),
+        _r(t0 + timedelta(minutes=90), air_gap_cm=93.0, litres=393.7, leak="y"),
+    ])
+    svc = SettingsService(sf)
+
+    await reset_noise_flags(sf, svc, apply=True)
+
+    async with sf() as session:
+        rows = (await session.execute(select(Reading).order_by(Reading.date))).scalars().all()
+    assert rows[1].leak_detected == "n"
+    assert "noise_suppressed" in (rows[1].raw_flags or "")
+
+
+@pytest.mark.asyncio
 async def test_chains_through_noise_to_last_trusted_baseline(sf) -> None:
     """The Watchman Sonic can lock onto a wrong reflection for several
     readings in a row. Consecutive readings at the same wrong value have

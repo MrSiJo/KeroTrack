@@ -395,6 +395,27 @@ def test_sanity_bound_skipped_when_interval_exceeds_max_gap() -> None:
     assert "noise_suppressed" not in str(result["raw_flags"] or "")
 
 
+def test_sanity_bound_suppresses_drop_beyond_max_gap() -> None:
+    # The May 29 2026 phantom leak: the sensor missed two broadcasts
+    # overnight, so the gap to the previous trusted reading was ~1.5 h —
+    # past SANITY_BOUND_MAX_GAP_HOURS (1.25 h). The old symmetric gate
+    # disarmed the bound entirely, letting an 80 → 93 cm multipath jump
+    # (~116 L "loss" in 90 min) fire as a leak. A *drop* can never beat
+    # the consumption budget at any gap length — you cannot burn 116 L of
+    # kerosene in 90 min — so leak suppression must stay armed regardless
+    # of gap. (Refills, which CAN be large and fast, keep the time gate —
+    # see test_sanity_bound_skipped_when_interval_exceeds_max_gap.)
+    prev_dt = datetime(2026, 5, 29, 7, 40, 16)
+    curr_dt = datetime(2026, 5, 29, 9, 10, 15)  # +1 h 30 min
+    payload = _payload(when=curr_dt, depth_cm=93.0, temp_c=14.0)
+    prev = _prev_at(prev_dt, air_gap_cm=80.0, litres_remaining=510.5)
+
+    result = process(payload, _ctx(), previous=prev)
+
+    assert result["leak_detected"] == "n"
+    assert "noise_suppressed" in str(result["raw_flags"] or "")
+
+
 def test_sanity_bound_allows_modest_consumption_within_budget() -> None:
     # Tight ×2 budget: cold 30 min budget ≈ 2.3 L. A 0.1 cm air-gap rise
     # (~0.9 L drop) is well within that — must not trip the sanity sentinel.

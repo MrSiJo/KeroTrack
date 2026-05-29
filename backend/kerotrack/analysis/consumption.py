@@ -40,6 +40,7 @@ from kerotrack.clock import local_now, local_now_str, parse_local
 from kerotrack.models.analysis_result import AnalysisResult
 from kerotrack.models.hdd import HddDatum
 from kerotrack.models.reading import Reading
+from kerotrack.models.refill import ActualRefillCost
 from kerotrack.publish.mqtt_publisher import MqttPublisher
 from kerotrack.pubsub.bus import PubSubBus
 from kerotrack.settings.service import SettingsService
@@ -149,13 +150,61 @@ async def _earliest_reading(sf: async_sessionmaker) -> Reading | None:
 
 
 async def _latest_refill_anchor(sf: async_sessionmaker) -> Reading | None:
-    """Find the most recent refill marker across the entire DB."""
+    """Most recent sensor-detected refill marker — the fallback anchor.
+
+    Excludes ``noise_suppressed`` rows so a phantom refill spike can't
+    masquerade as the last refill and reset the counter to ~0.
+    """
     async with sf() as session:
         return (
             await session.execute(
                 select(Reading)
-                .where(Reading.refill_detected == "y")
+                .where(
+                    Reading.refill_detected == "y",
+                    (Reading.raw_flags.is_(None))
+                    | (~Reading.raw_flags.like("%noise_suppressed%")),
+                )
                 .order_by(desc(Reading.date))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+
+async def _latest_manual_refill_date(sf: async_sessionmaker) -> str | None:
+    """Most recent operator-entered refill date — the authoritative record.
+
+    A genuine refill that lands inside a single reading interval (179 →
+    1110 L in 30 min, seen 2025-04-25) is indistinguishable from a Watchman
+    Sonic multipath spike by magnitude alone, so the sanity bound suppresses
+    it and it never sets ``refill_detected='y'``. The manual ``actual_refill_costs``
+    log is therefore the only reliable source for "last refill" — readings
+    alone leave ``days_since_refill`` months stale.
+    """
+    async with sf() as session:
+        return (
+            await session.execute(
+                select(ActualRefillCost.refill_date)
+                .order_by(desc(ActualRefillCost.refill_date))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+
+async def _first_trusted_reading_on_or_after(
+    sf: async_sessionmaker, date_str: str
+) -> Reading | None:
+    """First non-noise reading at or after ``date_str`` — the post-refill
+    tank level used as the consumption baseline."""
+    async with sf() as session:
+        return (
+            await session.execute(
+                select(Reading)
+                .where(
+                    Reading.date >= date_str,
+                    (Reading.raw_flags.is_(None))
+                    | (~Reading.raw_flags.like("%noise_suppressed%")),
+                )
+                .order_by(asc(Reading.date))
                 .limit(1)
             )
         ).scalar_one_or_none()
@@ -348,17 +397,47 @@ async def compute(
     daily_hw_l = _hot_water_baseline_l_per_day(snap.fuel_rate_l_per_h)
 
     latest_dt = parse_local(latest.date) or local_now()
-    refill = await _latest_refill_anchor(sf)
-    if refill is not None and refill.date != latest.date:
-        anchor = refill
-        anchor_is_refill = True
-    else:
-        anchor = earliest
-        anchor_is_refill = False
+
+    # Resolve the last-refill anchor. The operator's manual log
+    # (actual_refill_costs) is authoritative — a real refill that lands in
+    # one reading interval gets noise-suppressed and never sets
+    # refill_detected='y', so the sensor flag alone leaves the counter
+    # months stale. The displayed days_since_refill counts from the refill
+    # DATE; the consumption baseline snaps to the first trusted reading
+    # at/after it (the post-refill tank level). Fall back to the most recent
+    # sensor-detected refill marker only when no manual entry exists.
+    anchor = earliest
+    anchor_is_refill = False
+    refill_dt: datetime | None = None
+
+    manual_refill_date = await _latest_manual_refill_date(sf)
+    manual_dt = parse_local(manual_refill_date) if manual_refill_date else None
+    if manual_dt is not None and manual_dt <= latest_dt:
+        baseline = await _first_trusted_reading_on_or_after(sf, manual_refill_date)
+        if baseline is not None and baseline.date != latest.date:
+            anchor = baseline
+            anchor_is_refill = True
+            refill_dt = manual_dt
+
+    if not anchor_is_refill:
+        refill = await _latest_refill_anchor(sf)
+        if refill is not None and refill.date != latest.date:
+            anchor = refill
+            anchor_is_refill = True
+            refill_dt = parse_local(refill.date)
 
     anchor_dt = parse_local(anchor.date) or latest_dt
     days_since_anchor = max((latest_dt - anchor_dt).total_seconds() / 86400.0, 0.0)
-    days_since_refill = int(days_since_anchor) if anchor_is_refill else None
+    # Count days from the refill date itself (manual log or detected marker),
+    # not the baseline reading — a refill logged a few days after the physical
+    # top-up still reports the operator's date.
+    if anchor_is_refill:
+        count_from = refill_dt if refill_dt is not None else anchor_dt
+        days_since_refill = int(
+            max((latest_dt - count_from).total_seconds() / 86400.0, 0.0)
+        )
+    else:
+        days_since_refill = None
 
     # Total consumption since refill: simple anchor→latest delta (matches v1).
     # The per-pair walker is only used inside the bounded look-back window

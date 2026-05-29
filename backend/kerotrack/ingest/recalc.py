@@ -327,7 +327,7 @@ def process(
             else prev_date
         )
         watchdog_gap_s = (current_date - watchdog_date).total_seconds()
-        if 0 < interval_s and 0 < watchdog_gap_s <= SANITY_BOUND_MAX_GAP_HOURS * 3600:
+        if interval_s > 0:
             bound = _physical_change_bound_l(
                 interval_seconds=interval_s,
                 current_temperature_c=current_temp,
@@ -348,7 +348,19 @@ def process(
                 height_cm=ctx.tank_height_cm,
                 capacity_l=ctx.tank_capacity_l,
             )
-            if abs(curr_raw_l - prev_raw_l) > bound:
+            # Direction-aware gate. A level DROP (apparent leak/consumption)
+            # can never legitimately beat the consumption budget at ANY gap
+            # length — you cannot burn oil faster than max_daily_l — so leak
+            # suppression stays armed even after the sensor misses several
+            # broadcasts (the May 29 2026 phantom: a 1.5 h gap, two missed
+            # broadcasts, an 80 → 93 cm multipath jump read as a 116 L loss).
+            # A level RISE, by contrast, CAN be a genuine fast delivery after
+            # a real outage, so refill suppression releases once the cadence
+            # watchdog gap exceeds SANITY_BOUND_MAX_GAP_HOURS — otherwise we'd
+            # eat a real refill that landed while the sensor was offline.
+            is_drop = curr_raw_l < prev_raw_l
+            within_gap = 0 < watchdog_gap_s <= SANITY_BOUND_MAX_GAP_HOURS * 3600
+            if abs(curr_raw_l - prev_raw_l) > bound and (is_drop or within_gap):
                 refill_flag = "n"
                 leak_flag = "n"
                 raw_flags = (

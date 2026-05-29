@@ -125,9 +125,7 @@ async def reset_noise_flags(
             continue
         gap_from_prev_s = (curr_dt - prev_dt).total_seconds()
         interval_s = (curr_dt - trusted_dt).total_seconds()
-        # Long real gap (outage) → reset baseline. Anything could have
-        # happened during the gap, including a delivery.
-        if not (0 < gap_from_prev_s <= SANITY_BOUND_MAX_GAP_HOURS * 3600):
+        if gap_from_prev_s <= 0:
             trusted = curr
             prev = curr
             continue
@@ -151,6 +149,20 @@ async def reset_noise_flags(
             height_cm=snap["tank_height_cm"],
             capacity_l=snap["tank_capacity_l"],
         )
+        # Direction-aware gate, mirroring ingest/recalc.py. A level DROP
+        # can never beat the consumption budget at any gap, so leak
+        # suppression stays armed regardless of how long the sensor was
+        # quiet. A level RISE across a long gap (outage) could be a genuine
+        # delivery, so we reset the baseline and trust it rather than
+        # suppress. `gap_from_prev_s` tracks the real sample cadence (the
+        # outage watchdog); `interval_s` measures against the trusted
+        # baseline (chain-noise distance).
+        is_drop = curr_raw < trusted_raw
+        within_gap = 0 < gap_from_prev_s <= SANITY_BOUND_MAX_GAP_HOURS * 3600
+        if not is_drop and not within_gap:
+            trusted = curr
+            prev = curr
+            continue
         if abs(curr_raw - trusted_raw) > bound:
             affected.append(
                 {

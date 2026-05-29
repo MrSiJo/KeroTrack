@@ -24,6 +24,7 @@ from kerotrack.analysis.consumption import (
 )
 from kerotrack.models.hdd import HddDatum
 from kerotrack.models.reading import Reading
+from kerotrack.models.refill import ActualRefillCost
 from kerotrack.publish.mqtt_publisher import MqttPublisher
 from kerotrack.pubsub.bus import PubSubBus
 
@@ -154,6 +155,86 @@ async def test_anchor_finds_refill_far_outside_recent_window(
     assert 360 <= payload["days_since_refill"] <= 366
     assert 540.0 <= payload["total_consumption_since_refill"] <= 560.0
     assert payload["avg_daily_consumption_l"] > 1.0
+
+
+async def test_manual_refill_log_is_authoritative_anchor(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    """A real refill that lands inside one reading interval looks exactly
+    like a multipath spike, so it gets noise-suppressed and never sets
+    refill_detected='y'. The operator's manual log (actual_refill_costs)
+    is ground truth: days_since_refill must anchor to the most recent
+    manual entry, not the stale sensor-detected marker.
+
+    Mirrors the live data: a genuine 2025-04-25 refill was suppressed, so
+    the only 'y' marker left was an older refill — leaving days_since_refill
+    ~7 months too high until the manual log is consulted.
+    """
+    async with sf() as session:
+        # Stale sensor-detected refill marker (the only 'y' in readings).
+        session.add(
+            Reading(
+                date="2025-04-26 09:00:00",
+                id="probe",
+                litres_remaining=1100.0,
+                air_gap_cm=20.0,
+                refill_detected="y",
+                leak_detected="n",
+            )
+        )
+        # The real, more-recent refill the sensor saw as a spike and
+        # suppressed — no 'y' flag, stamped noise_suppressed.
+        session.add(
+            Reading(
+                date="2026-01-01 10:00:00",
+                id="probe",
+                litres_remaining=1200.0,
+                air_gap_cm=12.0,
+                refill_detected="n",
+                leak_detected="n",
+                raw_flags="128:noise_suppressed",
+            )
+        )
+        # First TRUSTED reading at/after the logged refill date — the
+        # consumption baseline (operators log the date at/after delivery).
+        session.add(
+            Reading(
+                date="2026-01-01 12:30:00",
+                id="probe",
+                litres_remaining=1200.0,
+                air_gap_cm=12.0,
+                refill_detected="n",
+                leak_detected="n",
+            )
+        )
+        # Steady draw down to "today".
+        session.add(
+            Reading(
+                date="2026-04-26 09:00:00",
+                id="probe",
+                litres_remaining=600.0,
+                air_gap_cm=72.0,
+                refill_detected="n",
+                leak_detected="n",
+            )
+        )
+        # Operator's manual log — authoritative last refill.
+        session.add(
+            ActualRefillCost(
+                refill_date="2026-01-01 12:00:00",
+                actual_volume_litres=1000.0,
+                invoice_ref="Standard Domestic Oil",
+            )
+        )
+        await session.commit()
+
+    payload = await compute(sf, seeded_settings)
+    assert payload is not None
+    # ~115 days from 2026-01-01 to 2026-04-26, NOT ~365 from 2025-04-26.
+    assert payload["days_since_refill"] is not None
+    assert 110 <= payload["days_since_refill"] <= 120
+    # Baseline is the post-refill ~1200 L reading, so consumption ~600 L.
+    assert 580.0 <= payload["total_consumption_since_refill"] <= 620.0
 
 
 async def test_anchor_falls_back_to_earliest_when_no_refill(
