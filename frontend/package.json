@@ -24,7 +24,7 @@
     "@types/node": "^22.19.18",
     "autoprefixer": "^10.4.20",
     "cron-converter": "^2.0.1",
-    "echarts": "^5.5.1",
+    "echarts": "^6.1.0",
     "jsdom": "^25.0.1",
     "postcss": "^8.5.14",
     "svelte": "^5.0.0",
