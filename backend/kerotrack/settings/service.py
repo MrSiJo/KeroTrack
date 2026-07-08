@@ -26,6 +26,7 @@ from kerotrack.settings.schema import (
     SettingDef,
     get_setting_def,
 )
+from kerotrack.settings.url_guard import validate_url_setting
 
 
 REDACTED_PUBLIC = "********"
@@ -129,6 +130,9 @@ class SettingsService:
             raise SettingError("unknown_setting", f"Unknown setting: {key}", field=key)
         definition = SETTINGS_CATALOGUE[key]
         coerced = _coerce_value(definition, value)
+        # SSRF guard: operator-set URLs the backend later fetches must pass
+        # scheme/allowlist/internal-host checks before they hit the table.
+        validate_url_setting(key, coerced)
         encoded = json.dumps(coerced)
         async with self._lock:
             async with self._sf() as session:
