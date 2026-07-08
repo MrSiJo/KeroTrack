@@ -75,7 +75,14 @@ class SettingsService:
             value = definition.default
         else:
             value = _decode_value(definition, row.value)
-        self._cache[key] = value
+        # Re-check under the same lock `set()` holds: a `set` that committed
+        # while our (pre-commit) read was in flight has already cached the
+        # newer value — caching our stale read over it would stick until the
+        # next set/invalidate (KERO-L3).
+        async with self._lock:
+            if key in self._cache:
+                return self._cache[key]
+            self._cache[key] = value
         return value
 
     async def all(self, group: str | None = None) -> list[dict[str, Any]]:
