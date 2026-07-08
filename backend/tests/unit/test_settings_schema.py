@@ -40,6 +40,7 @@ EXPECTED_KEYS: list[tuple[str, str, str, object, bool]] = [
     ("detection.warm_temperature_threshold_c", "float", "detection", 16.0, False),
     ("detection.leak_period_days", "int", "detection", 3, False),
     ("detection.leak_rate_per_day_l", "float", "detection", 10.0, False),
+    ("detection.sanity_safety_multiplier", "float", "detection", 2.0, False),
     ("mqtt.broker", "string", "mqtt", "localhost", False),
     ("mqtt.port", "int", "mqtt", 1883, False),
     ("mqtt.username", "string", "mqtt", "", False),
