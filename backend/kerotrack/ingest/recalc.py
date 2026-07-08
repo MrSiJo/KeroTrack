@@ -114,6 +114,15 @@ def calculate_bars(percentage: float) -> int:
     return 10
 
 
+# A refill must also move the physical oil surface: the volume jump alone
+# can be thermal/noise artefact, so we require the air gap to shrink by more
+# than this many cm too. ~5 cm ≈ 45 L on the 1225 L tank — well above the
+# sensor's 1 cm quantisation jitter, well below any real delivery. Unlike
+# the litre threshold (detection.refill_threshold_l) this is a property of
+# the sensor's reporting, not the installation, so it stays a constant.
+REFILL_MIN_AIR_GAP_DECREASE_CM = 5.0
+
+
 def detect_refill(
     current_litres: float,
     previous_litres: float | None,
@@ -126,7 +135,12 @@ def detect_refill(
         return "n"
     volume_increase = current_litres - previous_litres
     air_gap_decrease = previous_air_gap - current_air_gap
-    return "y" if volume_increase >= threshold_l and air_gap_decrease > 5 else "n"
+    return (
+        "y"
+        if volume_increase >= threshold_l
+        and air_gap_decrease > REFILL_MIN_AIR_GAP_DECREASE_CM
+        else "n"
+    )
 
 
 # Inter-reading gaps longer than this disable the sanity bound. The
