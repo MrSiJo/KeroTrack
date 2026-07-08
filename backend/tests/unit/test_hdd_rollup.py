@@ -126,3 +126,53 @@ async def test_heating_consumption_nonzero_on_cold_days(
     assert payload is not None
     assert payload["estimated_daily_heating_consumption_l"] > 0
     assert payload["consumption_per_hdd_l"] > 0
+
+
+async def test_upcoming_month_hdd_uses_same_month_last_year(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    """KERO-L8: with a full month of daily rows a year back, the estimate
+    is that month's total, not 'most recent HDD row'."""
+    async with sf() as session:
+        # Latest reading lands in Jan 2026 → upcoming month is Feb 2026;
+        # seed Feb 2025 dailies (28 days × 5.0 = 140.0).
+        for day in range(1, 29):
+            session.add(HddDatum(date=f"2025-02-{day:02d}", hdd=5.0))
+        for i in range(10):
+            session.add(
+                _reading(
+                    f"2026-01-{5 + i:02d} 12:00:00",
+                    hdd=8.0,
+                    litres=1000.0 - i * 8.0,
+                )
+            )
+        await session.commit()
+
+    await aggregate_daily_hdd(sf)
+    payload = await compute(sf, seeded_settings)
+
+    assert payload is not None
+    assert payload["upcoming_month_hdd"] == 140.0
+
+
+async def test_upcoming_month_hdd_falls_back_to_recent_mean(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    """KERO-L8: without last-year coverage, project the recent 30-day
+    daily mean over the upcoming month (Feb 2026 → 28 days × 8.0)."""
+    async with sf() as session:
+        for i in range(10):
+            session.add(
+                _reading(
+                    f"2026-01-{5 + i:02d} 12:00:00",
+                    hdd=8.0,
+                    litres=1000.0 - i * 8.0,
+                )
+            )
+        await session.commit()
+
+    await aggregate_daily_hdd(sf)
+    payload = await compute(sf, seeded_settings)
+
+    assert payload is not None
+    assert payload["upcoming_month_hdd"] == pytest.approx(28 * 8.0)

@@ -28,6 +28,7 @@ types, same rounding.
 
 from __future__ import annotations
 
+import calendar
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -63,6 +64,9 @@ DAYS_REMAINING_CAP_NO_HDD = 700.0
 HW_BUFFER_FACTOR = 1.1
 HW_SESSIONS_PER_WEEK = 10  # 1/day × 4 weekdays + 2/day × 3 weekend days
 HW_SESSION_HOURS = 0.5
+# How many daily hdd_data rows a historical month needs before its total is
+# trusted as the upcoming-month estimate (KERO-L8).
+MIN_HDD_DAYS_FOR_MONTH = 20
 
 
 # Real Nest heating-hours data (v1's get_seasonal_heating_factor).
@@ -509,14 +513,31 @@ async def compute(
         else 0.0
     )
 
-    # Upcoming month HDD (next month, same year unless December).
+    # Upcoming-month HDD estimate (KERO-L8): the old lookup keyed on next
+    # month's first day inside a window ending today, so it always fell
+    # through to "most recent row" and never meant "upcoming month".
+    # Estimate from real data instead: the same month last year's daily
+    # total when the (H1-backfilled) history covers it, otherwise the
+    # recent 30-day daily mean projected over the month.
     next_month = latest_dt.month + 1 if latest_dt.month < 12 else 1
     next_year = latest_dt.year + 1 if latest_dt.month == 12 else latest_dt.year
-    next_month_key = f"{next_year:04d}-{next_month:02d}-01"
-    upcoming_month_hdd = cumulative_hdd_data.get(next_month_key, 0.0)
-    if upcoming_month_hdd == 0.0 and cumulative_hdd_data:
-        # Fallback: most recent HDD row.
-        upcoming_month_hdd = next(iter(reversed(cumulative_hdd_data.values())), 0.0)
+    days_in_next_month = calendar.monthrange(next_year, next_month)[1]
+    ly_days = calendar.monthrange(next_year - 1, next_month)[1]
+    last_year_hdd = await _hdd_in_window(
+        sf,
+        datetime(next_year - 1, next_month, 1),
+        datetime(next_year - 1, next_month, ly_days, 23, 59, 59),
+    )
+    if len(last_year_hdd) >= MIN_HDD_DAYS_FOR_MONTH:
+        upcoming_month_hdd = sum(last_year_hdd.values())
+    else:
+        recent_30 = await _hdd_in_window(
+            sf, latest_dt - timedelta(days=30), latest_dt
+        )
+        avg_daily_hdd = (
+            sum(recent_30.values()) / len(recent_30) if recent_30 else 0.0
+        )
+        upcoming_month_hdd = avg_daily_hdd * days_in_next_month
 
     factor = _seasonal_heating_factor(next_month)
 
