@@ -97,6 +97,7 @@ async def logout(request: Request) -> dict[str, bool]:
 
 
 @router.post("/api/auth/change-password")
+@limiter.limit("5/minute")
 async def post_change_password(
     body: ChangePasswordBody, request: Request
 ) -> dict[str, bool]:
