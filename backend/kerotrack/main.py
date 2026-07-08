@@ -36,8 +36,6 @@ from kerotrack.api.routes.stream import router as stream_router
 from kerotrack.bootstrap import get_bootstrap
 from kerotrack.db import init_engine, session_factory
 from kerotrack.db_migrate import ensure_schema
-from pathlib import Path
-
 from kerotrack.ingest.mqtt import MqttIngest
 from kerotrack.prices.service import PriceService
 from kerotrack.pubsub.bus import PubSubBus
@@ -61,7 +59,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     prices = PriceService(
         settings_service=settings_service,
-        cache_path=Path("/app/data/price_cache.json"),
+        cache_path=boot.data_dir / "price_cache.json",
     )
 
     mqtt = MqttIngest(

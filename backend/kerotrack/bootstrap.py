@@ -7,9 +7,11 @@ Per spec §5.3 only these keys live in `.env`. Everything else is a row in the
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from sqlalchemy.engine import make_url
 
 
 _PLACEHOLDERS = {
@@ -66,6 +68,23 @@ class Bootstrap(BaseSettings):
                 "Generate one with `openssl rand -hex 32`."
             )
         return normalised
+
+    @property
+    def data_dir(self) -> Path:
+        """Directory for runtime data files (price cache, …).
+
+        Derived from `DATABASE_URL`'s SQLite file path so it follows the DB
+        wherever it is configured — the previous hardcoded `/app/data` made
+        every non-Docker dev run fail trying to create it (KERO-M3). Falls
+        back to the Docker default for in-memory/non-file URLs.
+        """
+        try:
+            db_path = make_url(self.database_url).database
+        except Exception:  # noqa: BLE001 — malformed URL fails later, at init_engine
+            db_path = None
+        if db_path and db_path != ":memory:":
+            return Path(db_path).resolve().parent
+        return Path("/app/data")
 
     def require_secret(self) -> str:
         """Return a non-empty `app_secret_key` or raise.

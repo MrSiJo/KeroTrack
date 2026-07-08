@@ -43,6 +43,11 @@ class PriceFetchResult:
     boilerjuice_ppl: float | None
     yournrg: YourNrgResult | None
     used_cache: bool
+    # True when a scrape was attempted and every provider failed (regardless
+    # of whether a stale cache value papered over it). Lets PriceService
+    # apply a cooldown instead of re-running the full retry ladder on every
+    # ingest reading (KERO-M3). False on fresh-cache short-circuits.
+    fetch_failed: bool = False
 
 
 async def fetch_boilerjuice(
@@ -224,6 +229,7 @@ async def fetch_current_price(
             boilerjuice_ppl=cached.get("boilerjuice", {}).get("ppl"),
             yournrg=None,
             used_cache=True,
+            fetch_failed=True,
         )
     return PriceFetchResult(
         ppl=None,
@@ -231,4 +237,5 @@ async def fetch_current_price(
         boilerjuice_ppl=None,
         yournrg=None,
         used_cache=False,
+        fetch_failed=True,
     )

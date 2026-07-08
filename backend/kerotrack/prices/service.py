@@ -8,6 +8,7 @@ price (cached or freshly scraped), or None if no source has ever succeeded.
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 
 import httpx
@@ -17,6 +18,14 @@ from kerotrack.prices.scraper import PriceFetchResult, fetch_current_price
 from kerotrack.settings.service import SettingsService
 
 logger = logging.getLogger(__name__)
+
+
+# After a scrape where every provider failed, don't re-run the full
+# retry ladder (2 sources × 3 attempts × 1s delays, ~6s inline in the
+# ingest path) for this long — serve the last known result instead
+# (KERO-M3). Total failure never writes a cache entry, so without this
+# the stall repeats on every reading until a provider recovers.
+FAILURE_COOLDOWN_S = 900.0
 
 
 class PriceService:
@@ -30,6 +39,7 @@ class PriceService:
         self._cache_path = cache_path
         self._client: httpx.AsyncClient | None = None
         self._last: PriceFetchResult | None = None
+        self._failed_at: float | None = None
 
     async def _ensure_client(self) -> httpx.AsyncClient:
         if self._client is None:
@@ -42,6 +52,12 @@ class PriceService:
             self._client = None
 
     async def refresh(self) -> PriceFetchResult:
+        if (
+            self._failed_at is not None
+            and self._last is not None
+            and (time.monotonic() - self._failed_at) < FAILURE_COOLDOWN_S
+        ):
+            return self._last
         ttl = int(await self._svc.get("prices.cache_ttl_seconds"))
         cache = PriceCache(self._cache_path, ttl_seconds=ttl)
         bj_url = str(await self._svc.get("prices.boilerjuice_url"))
@@ -64,7 +80,9 @@ class PriceService:
                 boilerjuice_ppl=None,
                 yournrg=None,
                 used_cache=cached is not None,
+                fetch_failed=True,
             )
+        self._failed_at = time.monotonic() if result.fetch_failed else None
         self._last = result
         return result
 
