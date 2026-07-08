@@ -292,3 +292,116 @@ def test_login_does_not_leak_user_existence(client: TestClient) -> None:
         == unknown.json()["detail"]["error"]
         == "auth_required"
     )
+
+
+# -------------------------------------------------- 8. change-password throttle
+
+
+def test_change_password_rate_limit_trips_after_five(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """change-password is auth+CSRF gated AND rate-limited like login."""
+    app = _build_app(monkeypatch, tmp_path)
+    # Limiter explicitly LEFT enabled for this test. The limiter is a module
+    # singleton with in-memory storage shared across tests, so reset its
+    # counters first — otherwise the single login below may already be
+    # throttled by an earlier test using the same `testclient` key.
+    app.state.limiter.reset()
+    with TestClient(app) as c:
+        c.post(
+            "/api/setup",
+            json={"username": "admin", "password": "hunter2-strong-pw"},
+        )
+        login = c.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "hunter2-strong-pw"},
+        )
+        token = login.json()["csrf_token"]
+        headers = {"X-CSRF-Token": token}
+        body = {
+            "old_password": "wrong-old-password",
+            "new_password": "another-strong-pw",
+        }
+        # Five wrong-old-password attempts: each is a 4xx auth error, not 429.
+        for _ in range(5):
+            resp = c.post(
+                "/api/auth/change-password", headers=headers, json=body
+            )
+            assert resp.status_code != 429
+        # Sixth attempt is throttled.
+        sixth = c.post(
+            "/api/auth/change-password", headers=headers, json=body
+        )
+        assert sixth.status_code == 429
+    from kerotrack.bootstrap import reset_bootstrap_cache
+    reset_bootstrap_cache()
+
+
+# ----------------------------------------------- 9. SSRF guard on settings URLs
+#
+# The contract (CLAUDE.md → "Outbound HTTP / SSRF") requires scheme validation
+# plus an allowlist on operator-set fetch URLs. These exercise the guard at the
+# write path (`SettingsService.set`). Each builds its own engine/service and
+# runs under a fresh event loop so it stays independent of the sync TestClient.
+
+
+def _run_set(tmp_path: Path, key: str, value: object) -> None:
+    """Seed a settings DB and call `set(key, value)` under a fresh loop."""
+    import asyncio
+
+    from kerotrack.db import init_engine, session_factory
+    from kerotrack.db_migrate import ensure_schema
+    from kerotrack.settings.seeds import seed_defaults
+    from kerotrack.settings.service import SettingsService
+
+    db = tmp_path / "ssrf.db"
+
+    async def _run() -> None:
+        engine = init_engine(f"sqlite+aiosqlite:///{db.as_posix()}")
+        await ensure_schema(engine)
+        sf = session_factory(engine)
+        async with sf() as session:
+            await seed_defaults(session)
+        svc = SettingsService(sf)
+        try:
+            await svc.set(key, value, source="test")
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_run())
+
+
+def test_price_url_rejects_non_http_scheme(tmp_path: Path) -> None:
+    """Operator-set fetch URLs must be http/https (SSRF contract)."""
+    from kerotrack.settings.service import SettingError
+
+    with pytest.raises(SettingError) as exc:
+        _run_set(tmp_path, "prices.boilerjuice_url", "file:///etc/passwd")
+    assert exc.value.code in {"invalid_url_scheme", "invalid_url"}
+
+
+def test_price_url_rejects_off_allowlist_host(tmp_path: Path) -> None:
+    from kerotrack.settings.service import SettingError
+
+    with pytest.raises(SettingError) as exc:
+        _run_set(tmp_path, "prices.boilerjuice_url", "https://attacker.example/x")
+    assert exc.value.code == "url_host_not_allowed"
+
+
+def test_apprise_url_rejects_internal_host(tmp_path: Path) -> None:
+    from kerotrack.settings.service import SettingError
+
+    with pytest.raises(SettingError) as exc:
+        _run_set(
+            tmp_path, "notifications.apprise_urls", ["gotify://127.0.0.1/token"]
+        )
+    assert exc.value.code == "url_host_internal"
+
+
+def test_price_url_allowlisted_host_passes(tmp_path: Path) -> None:
+    """The catalogue defaults must remain settable (no false positives)."""
+    _run_set(
+        tmp_path,
+        "prices.boilerjuice_url",
+        "https://www.boilerjuice.com/heating-oil-prices-england/",
+    )
