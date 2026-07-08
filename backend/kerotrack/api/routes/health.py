@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Response, status
 from sqlalchemy import desc, select, text
 
 from kerotrack.clock import local_now, parse_local
@@ -12,7 +12,7 @@ router = APIRouter(tags=["health"])
 
 
 @router.get("/api/health")
-async def health(request: Request) -> dict[str, object]:
+async def health(request: Request, response: Response) -> dict[str, object]:
     payload: dict[str, object] = {
         "status": "ok",
         "db": "unknown",
@@ -26,6 +26,10 @@ async def health(request: Request) -> dict[str, object]:
     if sf is None:
         payload["db"] = "down"
         payload["status"] = "degraded"
+        # Non-200 so the Docker healthcheck (curl -fsS) and compose's
+        # depends_on: service_healthy gate actually fail on a dead DB
+        # (KERO-M2).
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         return payload
 
     try:
@@ -57,4 +61,6 @@ async def health(request: Request) -> dict[str, object]:
     if scheduler is not None:
         payload["scheduler_running"] = bool(getattr(scheduler, "running", False))
 
+    if payload["status"] != "ok":
+        response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return payload

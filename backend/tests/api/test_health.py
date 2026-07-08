@@ -65,3 +65,20 @@ def test_health_reflects_latest_reading(client: TestClient) -> None:
     resp = client.get("/api/health").json()
     assert resp["last_reading_at"] == "2026-04-25 12:00:00"
     assert resp["age_seconds"] is not None
+
+
+def test_health_returns_503_when_db_down(client: TestClient) -> None:
+    """Docker's `curl -fsS` healthcheck can only fail on a non-2xx status,
+    so a broken DB must surface as 503, not a 200 with degraded in the
+    body (KERO-M2)."""
+    app = client.app  # type: ignore[attr-defined]
+    saved = app.state.session_factory
+    try:
+        app.state.session_factory = None
+        resp = client.get("/api/health")
+        assert resp.status_code == 503
+        body = resp.json()
+        assert body["status"] == "degraded"
+        assert body["db"] == "down"
+    finally:
+        app.state.session_factory = saved
