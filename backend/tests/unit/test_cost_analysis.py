@@ -469,3 +469,32 @@ async def test_run_cost_analysis_writes_periods_via_detect(
     )
     assert payload is not None
     assert payload["total_refill_periods"] >= 1
+
+
+async def test_persist_upserts_on_same_day(sf: async_sessionmaker) -> None:
+    """Two runs on the same day update one row instead of appending
+    near-duplicates keyed on second-resolution timestamps (KERO-L5)."""
+    from sqlalchemy import select
+
+    from kerotrack.analysis.cost import _persist
+    from kerotrack.models.cost_analysis import CostAnalysis
+
+    await _persist(
+        sf, {"analysis_date": "2026-07-08 07:00:00", "latest_total_cost": 10.0}
+    )
+    await _persist(
+        sf, {"analysis_date": "2026-07-08 09:30:00", "latest_total_cost": 12.5}
+    )
+    await _persist(
+        sf, {"analysis_date": "2026-07-09 07:00:00", "latest_total_cost": 13.0}
+    )
+
+    async with sf() as session:
+        rows = (
+            (await session.execute(select(CostAnalysis))).scalars().all()
+        )
+    by_date = {r.analysis_date: r.latest_total_cost for r in rows}
+    assert by_date == {
+        "2026-07-08 09:30:00": 12.5,
+        "2026-07-09 07:00:00": 13.0,
+    }

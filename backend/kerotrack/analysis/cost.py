@@ -24,7 +24,7 @@ from collections.abc import Iterable
 from datetime import datetime, timedelta
 from typing import Any
 
-from sqlalchemy import asc, desc, select
+from sqlalchemy import asc, desc, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kerotrack.clock import local_now, local_now_str, parse_local
@@ -527,12 +527,21 @@ async def compute(
 
 
 async def _persist(sf: async_sessionmaker, payload: dict[str, Any]) -> None:
+    """Upsert keyed on the analysis DAY, not the full timestamp.
+
+    `analysis_date` is second-resolution, so matching on the exact value
+    inserted a fresh row on every scheduled/manual run — an append-only
+    table of near-duplicates (KERO-L5). Re-runs on the same day now update
+    that day's row in place.
+    """
+    day = str(payload["analysis_date"])[:10]
     async with sf() as session:
         existing = (
             await session.execute(
-                select(CostAnalysis).where(
-                    CostAnalysis.analysis_date == payload["analysis_date"]
-                )
+                select(CostAnalysis)
+                .where(func.substr(CostAnalysis.analysis_date, 1, 10) == day)
+                .order_by(desc(CostAnalysis.analysis_date))
+                .limit(1)
             )
         ).scalar_one_or_none()
         if existing is None:

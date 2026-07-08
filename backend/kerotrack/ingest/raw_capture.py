@@ -58,6 +58,28 @@ async def persist_raw_capture(
         await session.commit()
 
 
+# One year of ~30-min readings ≈ 17k rows — trivial for SQLite, but without
+# a sweep the table grows forever and `kerotrack prune-raw` is break-glass
+# only (KERO-L5).
+RAW_CAPTURE_RETENTION_DAYS = 365
+
+
+async def sweep_raw_captures(sf: async_sessionmaker) -> dict[str, Any]:
+    """Scheduled retention sweep — delete captures older than a year.
+
+    Runs from the weekly cost-analysis job (see scheduler/jobs.py); the
+    break-glass CLI remains for ad-hoc pruning with other cutoffs.
+    """
+    from datetime import timedelta
+
+    from kerotrack.clock import local_now
+
+    cutoff = (local_now() - timedelta(days=RAW_CAPTURE_RETENTION_DAYS)).strftime(
+        "%Y-%m-%d"
+    )
+    return await prune_raw_captures(sf, before=cutoff, apply=True)
+
+
 async def prune_raw_captures(
     sf: async_sessionmaker, *, before: str, apply: bool = False
 ) -> dict[str, Any]:

@@ -93,3 +93,28 @@ async def test_prune_apply_deletes_old_rows(sf: async_sessionmaker) -> None:
         rows = (await session.execute(select(RawCapture))).scalars().all()
     assert len(rows) == 1
     assert rows[0].received_at == "2026-01-01 12:00:00"
+
+
+async def test_sweep_deletes_rows_older_than_a_year(
+    sf: async_sessionmaker,
+) -> None:
+    """Scheduled retention sweep (KERO-L5): > 1 year old goes, recent stays."""
+    from datetime import timedelta
+
+    from kerotrack.clock import local_now
+    from kerotrack.ingest.raw_capture import sweep_raw_captures
+
+    old = (local_now() - timedelta(days=400)).strftime("%Y-%m-%d %H:%M:%S")
+    recent = (local_now() - timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+    async with sf() as session:
+        session.add(RawCapture(received_at=old, topic="t", raw_json="{}"))
+        session.add(RawCapture(received_at=recent, topic="t", raw_json="{}"))
+        await session.commit()
+
+    report = await sweep_raw_captures(sf)
+
+    assert report["apply"] is True
+    assert report["deleted"] == 1
+    async with sf() as session:
+        rows = (await session.execute(select(RawCapture))).scalars().all()
+    assert [r.received_at for r in rows] == [recent]
