@@ -9,7 +9,7 @@ describe("typed api client", () => {
 
   it("attaches X-CSRF-Token to mutating verbs when set", async () => {
     setCsrfToken("token-123");
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) =>
       new Response(JSON.stringify({ key: "x", value: 1 }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -23,7 +23,7 @@ describe("typed api client", () => {
 
   it("does not attach CSRF on GET requests", async () => {
     setCsrfToken("token-123");
-    const fetchMock = vi.fn(async () =>
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) =>
       new Response(JSON.stringify({ status: "ok" }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
