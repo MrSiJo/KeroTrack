@@ -36,6 +36,7 @@ from typing import Any
 from sqlalchemy import asc, desc, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from kerotrack.analysis.hdd_rollup import aggregate_daily_hdd
 from kerotrack.clock import local_now, local_now_str, parse_local
 from kerotrack.models.analysis_result import AnalysisResult
 from kerotrack.models.hdd import HddDatum
@@ -624,6 +625,14 @@ async def run_analysis(
     publisher: MqttPublisher,
     pubsub: PubSubBus | None = None,
 ) -> dict[str, Any] | None:
+    # Refresh daily hdd_data from per-reading HDD values first — every
+    # HDD lookup below keys on YYYY-MM-DD, and nothing else writes the
+    # table (KERO-H1). A roll-up failure must not block the analysis;
+    # it just runs on whatever hdd_data already holds.
+    try:
+        await aggregate_daily_hdd(sf)
+    except Exception:  # noqa: BLE001
+        logger.exception("daily HDD roll-up failed; continuing with existing hdd_data")
     payload = await compute(sf, settings_service)
     if payload is None:
         logger.info("Not enough data for analysis run")
