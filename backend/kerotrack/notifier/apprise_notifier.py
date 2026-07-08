@@ -10,6 +10,7 @@ predicate, and includes the monthly block.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
@@ -485,9 +486,15 @@ async def run(
     instance = (
         apprise_factory(urls) if apprise_factory else _build_apprise(urls)
     )
+    # apprise.notify() is synchronous network I/O — a slow Gotify/SMTP
+    # target would otherwise stall the whole event loop (SSE, MQTT ingest)
+    # for the duration, so run it in a worker thread (KERO-M1).
     ok = bool(
-        instance.notify(
-            body=body, title=title, body_format=apprise.NotifyFormat.MARKDOWN
+        await asyncio.to_thread(
+            instance.notify,
+            body=body,
+            title=title,
+            body_format=apprise.NotifyFormat.MARKDOWN,
         )
     )
     return NotifierResult(

@@ -132,7 +132,10 @@ class SettingsService:
         coerced = _coerce_value(definition, value)
         # SSRF guard: operator-set URLs the backend later fetches must pass
         # scheme/allowlist/internal-host checks before they hit the table.
-        validate_url_setting(key, coerced)
+        # Runs in a worker thread because the guard may do a blocking
+        # getaddrinfo DNS lookup — a hanging resolver must not freeze the
+        # event loop on a settings save (KERO-M1).
+        await asyncio.to_thread(validate_url_setting, key, coerced)
         encoded = json.dumps(coerced)
         async with self._lock:
             async with self._sf() as session:
