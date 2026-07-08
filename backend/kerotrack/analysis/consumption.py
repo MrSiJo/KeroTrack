@@ -40,7 +40,7 @@ from kerotrack.analysis.hdd_rollup import aggregate_daily_hdd
 from kerotrack.clock import local_now, local_now_str, parse_local
 from kerotrack.models.analysis_result import AnalysisResult
 from kerotrack.models.hdd import HddDatum
-from kerotrack.models.reading import Reading
+from kerotrack.models.reading import Reading, trusted_readings_clause
 from kerotrack.models.refill import ActualRefillCost
 from kerotrack.publish.mqtt_publisher import MqttPublisher
 from kerotrack.pubsub.bus import PubSubBus
@@ -131,10 +131,7 @@ async def _latest_reading(sf: async_sessionmaker) -> Reading | None:
         return (
             await session.execute(
                 select(Reading)
-                .where(
-                    (Reading.raw_flags.is_(None))
-                    | (~Reading.raw_flags.like("%noise_suppressed%"))
-                )
+                .where(trusted_readings_clause())
                 .order_by(desc(Reading.date))
                 .limit(1)
             )
@@ -162,8 +159,7 @@ async def _latest_refill_anchor(sf: async_sessionmaker) -> Reading | None:
                 select(Reading)
                 .where(
                     Reading.refill_detected == "y",
-                    (Reading.raw_flags.is_(None))
-                    | (~Reading.raw_flags.like("%noise_suppressed%")),
+                    trusted_readings_clause(),
                 )
                 .order_by(desc(Reading.date))
                 .limit(1)
@@ -202,8 +198,7 @@ async def _first_trusted_reading_on_or_after(
                 select(Reading)
                 .where(
                     Reading.date >= date_str,
-                    (Reading.raw_flags.is_(None))
-                    | (~Reading.raw_flags.like("%noise_suppressed%")),
+                    trusted_readings_clause(),
                 )
                 .order_by(asc(Reading.date))
                 .limit(1)
@@ -232,8 +227,7 @@ async def _readings_in_window(
                     .where(
                         Reading.date >= start,
                         Reading.date <= end,
-                        (Reading.raw_flags.is_(None))
-                        | (~Reading.raw_flags.like("%noise_suppressed%")),
+                        trusted_readings_clause(),
                     )
                     .order_by(asc(Reading.date))
                 )

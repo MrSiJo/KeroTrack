@@ -20,7 +20,7 @@ from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kerotrack.models.analysis_result import AnalysisResult
-from kerotrack.models.reading import Reading
+from kerotrack.models.reading import Reading, trusted_readings_clause
 from kerotrack.settings.service import SettingsService
 
 logger = logging.getLogger(__name__)
@@ -68,8 +68,7 @@ async def _fetch_readings_between(
                 .where(
                     Reading.date >= start,
                     Reading.date <= end,
-                    (Reading.raw_flags.is_(None))
-                    | (~Reading.raw_flags.like("%noise_suppressed%")),
+                    trusted_readings_clause(),
                 )
                 .order_by(Reading.date.asc())
             )
@@ -87,10 +86,16 @@ async def _fetch_readings_between(
 
 
 async def _latest_reading(sf: async_sessionmaker) -> Reading | None:
+    """Most recent TRUSTED reading — the digest's "⛽ Tank Level" line must
+    not report a noise-suppressed multipath spike as the current level
+    (this was the one site that had drifted and lacked the filter; KERO-H3)."""
     async with sf() as session:
         return (
             await session.execute(
-                select(Reading).order_by(desc(Reading.date)).limit(1)
+                select(Reading)
+                .where(trusted_readings_clause())
+                .order_by(desc(Reading.date))
+                .limit(1)
             )
         ).scalar_one_or_none()
 

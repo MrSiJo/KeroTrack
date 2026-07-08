@@ -17,6 +17,10 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
+# Re-exported for existing importers (noise_reset, tests); the definition
+# lives beside the trusted-readings query filter it drives (KERO-H3).
+from kerotrack.models.reading import NOISE_SUPPRESSED_SENTINEL  # noqa: F401
+
 logger = logging.getLogger(__name__)
 
 
@@ -128,7 +132,6 @@ def detect_refill(
     return "y" if volume_increase >= threshold_l and air_gap_decrease > 5 else "n"
 
 
-NOISE_SUPPRESSED_SENTINEL = "noise_suppressed"
 # Inter-reading gaps longer than this disable the sanity bound. The
 # Watchman Sonic broadcasts every ~30 min in normal operation; one
 # missed broadcast lands the gap at ~60 min + broadcast-time jitter

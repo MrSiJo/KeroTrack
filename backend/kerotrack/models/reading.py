@@ -2,10 +2,16 @@
 
 from __future__ import annotations
 
-from sqlalchemy import Float, Integer, String, Text
+from sqlalchemy import ColumnElement, Float, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kerotrack.models.base import Base
+
+
+# Stamped into `raw_flags` by ingest when a reading fails the sanity gate
+# (Watchman Sonic multipath spikes). Single source of truth — recalc and
+# noise_reset import it from here.
+NOISE_SUPPRESSED_SENTINEL = "noise_suppressed"
 
 
 class Reading(Base):
@@ -33,3 +39,20 @@ class Reading(Base):
     raw_flags: Mapped[str | None] = mapped_column(Text, nullable=True)
     litres_to_order: Mapped[float | None] = mapped_column(Float, nullable=True)
     bars_remaining: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+def trusted_readings_clause() -> ColumnElement[bool]:
+    """Filter to rows whose litres/air-gap values can be trusted.
+
+    Excludes rows stamped ``noise_suppressed`` in ``raw_flags`` — those
+    carry the sensor's bad multipath litres, so any query that anchors a
+    level, walks consumption deltas, or reports "current tank level" must
+    skip them. Rows with NULL ``raw_flags`` (pre-feature data) are kept.
+
+    Use this everywhere instead of hand-writing the LIKE — the copies had
+    already drifted once (the weekly digest's latest-reading query lacked
+    the filter while the dashboard had it; KERO-H3).
+    """
+    return (Reading.raw_flags.is_(None)) | (
+        ~Reading.raw_flags.like(f"%{NOISE_SUPPRESSED_SENTINEL}%")
+    )

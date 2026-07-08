@@ -139,6 +139,62 @@ async def test_run_weekly_sunday_sends_rich_format(sf, seeded_settings) -> None:
     assert "850.0 L (69.0%)" in result.body
 
 
+async def test_weekly_tank_level_skips_noise_suppressed_spike(
+    sf, seeded_settings
+) -> None:
+    """A multipath spike stamped noise_suppressed must not become the
+    digest's ⛽ Tank Level — it should agree with the dashboard, which
+    already skipped such rows (KERO-H3 drift)."""
+    await seeded_settings.set(
+        "notifications.apprise_urls", ["gotify://host/token"]
+    )
+    async with sf() as session:
+        session.add(
+            Reading(
+                date="2026-04-19 08:00:00",
+                id="probe",
+                litres_remaining=900.0,
+                percentage_remaining=73.5,
+                current_ppl=78.0,
+                refill_detected="n",
+            )
+        )
+        session.add(
+            Reading(
+                date="2026-04-26 07:00:00",
+                id="probe",
+                litres_remaining=850.0,
+                percentage_remaining=69.0,
+                current_ppl=78.5,
+                refill_detected="n",
+            )
+        )
+        # Newest row is a suppressed sensor spike — bad litres value.
+        session.add(
+            Reading(
+                date="2026-04-26 07:30:00",
+                id="probe",
+                litres_remaining=1150.0,
+                percentage_remaining=93.9,
+                current_ppl=78.5,
+                refill_detected="n",
+                raw_flags="152:noise_suppressed",
+            )
+        )
+        await session.commit()
+
+    fake = _FakeApprise()
+    result = await run(
+        sf=sf,
+        settings_service=seeded_settings,
+        now=datetime(2026, 4, 26, 8, 0, 0),
+        apprise_factory=_factory(fake),
+    )
+    assert result.sent is True
+    assert "850.0 L (69.0%)" in result.body
+    assert "1150.0" not in result.body
+
+
 async def test_gotify_url_gets_markdown_format() -> None:
     from kerotrack.notifier.apprise_notifier import _build_apprise
     instance = _build_apprise(["gotify://host/token"])

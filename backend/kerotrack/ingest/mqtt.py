@@ -25,7 +25,7 @@ from kerotrack.ingest.recalc import (
     context_from_settings,
     process,
 )
-from kerotrack.models.reading import Reading
+from kerotrack.models.reading import Reading, trusted_readings_clause
 from kerotrack.publish.mqtt_publisher import MqttPublisher
 from kerotrack.pubsub.bus import PubSubBus
 
@@ -51,9 +51,7 @@ async def _load_previous(
     already-migrated rows that share the same minute). That collapses
     `litres_used_since_last` to 0 for every recurrence.
     """
-    noise_clause = (Reading.raw_flags.is_(None)) | (
-        ~Reading.raw_flags.like("%noise_suppressed%")
-    )
+    noise_clause = trusted_readings_clause()
     async with sf() as session:
         trusted_stmt = (
             select(Reading.date, Reading.litres_remaining, Reading.air_gap_cm)

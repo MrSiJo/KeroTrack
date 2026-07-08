@@ -30,7 +30,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from kerotrack.clock import local_now, local_now_str, parse_local
 from kerotrack.models.cost_analysis import CostAnalysis
 from kerotrack.models.hdd import HddDatum
-from kerotrack.models.reading import Reading
+from kerotrack.models.reading import Reading, trusted_readings_clause
 from kerotrack.models.refill import ActualRefillCost
 from kerotrack.models.refill_period import RefillPeriod
 from kerotrack.publish.mqtt_publisher import MqttPublisher
@@ -98,8 +98,7 @@ async def _readings_between(
                     .where(
                         Reading.date >= start,
                         end_clause,
-                        (Reading.raw_flags.is_(None))
-                        | (~Reading.raw_flags.like("%noise_suppressed%")),
+                        trusted_readings_clause(),
                     )
                     .order_by(asc(Reading.date))
                 )

@@ -9,7 +9,7 @@ from sqlalchemy import desc, select
 
 from kerotrack.models.analysis_result import AnalysisResult
 from kerotrack.models.cost_analysis import CostAnalysis
-from kerotrack.models.reading import Reading
+from kerotrack.models.reading import Reading, trusted_readings_clause
 
 router = APIRouter(prefix="/api/status", tags=["status"])
 
@@ -25,10 +25,7 @@ async def get_status(request: Request) -> dict[str, Any]:
         latest_reading = (
             await session.execute(
                 select(Reading)
-                .where(
-                    (Reading.raw_flags.is_(None))
-                    | (~Reading.raw_flags.like("%noise_suppressed%"))
-                )
+                .where(trusted_readings_clause())
                 .order_by(desc(Reading.date))
                 .limit(1)
             )
