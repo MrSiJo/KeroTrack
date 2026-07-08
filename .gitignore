@@ -47,5 +47,8 @@ compose.override.yaml
 # v1 → v2 migration source (developer's local copy of the production DB; never committed)
 legacy/
 
+# Local UI screenshots
+snapshots/
+
 # OS
 Thumbs.db
