@@ -63,10 +63,7 @@ FIXTURES = json.loads(
 def _ctx(**overrides) -> RecalcContext:
     base = dict(
         tank_capacity_l=1225.0,
-        tank_length_cm=178.5,
-        tank_width_cm=75.0,
         tank_height_cm=137.0,
-        thermal_coefficient=0.0007,
         reference_temperature=15.0,
         thermal_expansion_coefficient=0.0008,
         hdd_base_temperature=15.5,

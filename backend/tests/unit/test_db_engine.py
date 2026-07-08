@@ -23,7 +23,6 @@ EXPECTED_TABLES = {
     "actual_refill_costs",
     "refill_periods",
     "hdd_data",
-    "energy_metrics",
     "cost_analysis",
 }
 

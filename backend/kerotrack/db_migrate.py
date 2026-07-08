@@ -3,7 +3,7 @@
 Brings up every table the v2 system needs:
 
 - v1-compatible: readings, analysis_results, refill_periods, actual_refill_costs,
-  hdd_data, energy_metrics, cost_analysis
+  hdd_data, cost_analysis
 - v2 additions: settings, setting_changes, users (Phase 2.5)
 
 `ensure_schema` is idempotent — calling it twice on an empty DB and once-then-once
@@ -26,7 +26,6 @@ from kerotrack.models import analysis_result as _ar  # noqa: F401
 from kerotrack.models import refill as _refill  # noqa: F401
 from kerotrack.models import refill_period as _rp  # noqa: F401
 from kerotrack.models import hdd as _hdd  # noqa: F401
-from kerotrack.models import energy_metric as _em  # noqa: F401
 from kerotrack.models import cost_analysis as _ca  # noqa: F401
 from kerotrack.models import user as _user  # noqa: F401
 from kerotrack.models import monthly_ppl as _mppl  # noqa: F401

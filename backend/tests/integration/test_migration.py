@@ -203,7 +203,7 @@ async def test_tolerates_missing_optional_tables(
     )
     assert report.rows_per_table["readings"]["copied"] == 1
     # Tables not present in source are recorded as zero.
-    assert report.rows_per_table["energy_metrics"]["source"] == 0
+    assert report.rows_per_table["hdd_data"]["source"] == 0
 
 
 async def test_report_path_writes_json(

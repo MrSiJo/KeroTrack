@@ -55,10 +55,7 @@ class RecalcContext:
     """
 
     tank_capacity_l: float
-    tank_length_cm: float
-    tank_width_cm: float
     tank_height_cm: float
-    thermal_coefficient: float
     reference_temperature: float
     thermal_expansion_coefficient: float
     hdd_base_temperature: float
@@ -408,10 +405,7 @@ async def context_from_settings(
     g = settings_service.get
     return RecalcContext(
         tank_capacity_l=float(await g("tank.capacity_l")),
-        tank_length_cm=float(await g("tank.length_cm")),
-        tank_width_cm=float(await g("tank.width_cm")),
         tank_height_cm=float(await g("tank.height_cm")),
-        thermal_coefficient=float(await g("tank.thermal_coefficient")),
         reference_temperature=float(await g("analysis.reference_temperature")),
         thermal_expansion_coefficient=float(
             await g("analysis.thermal_expansion_coefficient")

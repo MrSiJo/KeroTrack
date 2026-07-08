@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import fnmatch
 import json
-import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -225,9 +224,6 @@ class SettingsService:
 
 
 # ---------------------------------------------------------------- coercion
-
-_CRON_RE = re.compile(r"^[\S]+(?:\s+[\S]+){4}(?:\s+[\S]+)?$")
-
 
 def _coerce_value(definition: SettingDef, raw: Any) -> Any:
     vt = definition.value_type

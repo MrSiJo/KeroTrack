@@ -16,7 +16,6 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from kerotrack.migration.yaml_mapping import map_yaml_to_settings
 from kerotrack.models.analysis_result import AnalysisResult
 from kerotrack.models.cost_analysis import CostAnalysis
-from kerotrack.models.energy_metric import EnergyMetric
 from kerotrack.models.hdd import HddDatum
 from kerotrack.models.reading import Reading
 from kerotrack.models.refill import ActualRefillCost
@@ -32,7 +31,6 @@ TABLE_TO_MODEL = {
     "actual_refill_costs": ActualRefillCost,
     "refill_periods": RefillPeriod,
     "hdd_data": HddDatum,
-    "energy_metrics": EnergyMetric,
     "cost_analysis": CostAnalysis,
 }
 

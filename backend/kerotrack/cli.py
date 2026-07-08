@@ -345,7 +345,6 @@ async def _reset_noise_flags(args: argparse.Namespace) -> int:
         return 0
 
     if args.src_db:
-        boot = get_bootstrap()
         src_path = Path(args.src_db).resolve()
         url = f"sqlite+aiosqlite:///{src_path.as_posix()}"
         engine = init_engine(url)
@@ -416,7 +415,6 @@ async def _rebuild_costs(args: argparse.Namespace) -> int:
         # Spin up an isolated engine against the alternative DB. Used
         # for validating the rebuild against a snapshot before touching
         # the live volume.
-        boot = get_bootstrap()
         src_path = Path(args.src_db).resolve()
         url = f"sqlite+aiosqlite:///{src_path.as_posix()}"
         engine = init_engine(url)
@@ -428,7 +426,6 @@ async def _rebuild_costs(args: argparse.Namespace) -> int:
             return await _do(sf)
         finally:
             await engine.dispose()
-        return 0
     return await _with_session(_do)
 
 
