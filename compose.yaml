@@ -32,6 +32,17 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    environment:
+      # Which peers uvicorn trusts to supply X-Forwarded-For. Default
+      # (127.0.0.1) means the header from the frontend nginx container is
+      # IGNORED and slowapi rate-limits key on the nginx container IP —
+      # i.e. one shared bucket for all clients. For per-client buckets,
+      # set FORWARDED_ALLOW_IPS in `.env` to the frontend container's IP
+      # (or the compose network's subnet in CIDR form). Keep it narrow:
+      # the backend port is also published on the host, so a wide trust
+      # range lets direct callers spoof XFF to rotate buckets.
+      # (RFC 1918 literals stay out of the repo — see pre-commit hook.)
+      FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-127.0.0.1}
     ports:
       - "${BACKEND_PORT:-9176}:9176"
     volumes:

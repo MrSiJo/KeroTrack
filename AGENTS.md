@@ -43,10 +43,21 @@ change, not the contract.
   setting `SESSION_COOKIE_SECURE=false`.
 
 ### Rate limiting
-- `slowapi` rate-limits `POST /api/setup` and `POST /api/auth/login` at
-  `5/minute` per remote IP. Wired in `api/rate_limit.py` and registered in
-  `main.py`. Honours `X-Forwarded-For` from NPM via uvicorn's standard proxy
-  header handling. Tests disable with `app.state.limiter.enabled = False`.
+- `slowapi` rate-limits `POST /api/setup`, `POST /api/auth/login` and
+  `POST /api/auth/change-password` at `5/minute`. Wired in
+  `api/rate_limit.py` and registered in `main.py`. Tests disable with
+  `app.state.limiter.enabled = False`.
+- The key is the immediate peer's IP **unless** uvicorn is told to trust
+  `X-Forwarded-For`: `forwarded_allow_ips` defaults to `127.0.0.1`, and in
+  the compose deployment the peer is the frontend nginx container, so by
+  default all clients share ONE 5/minute bucket keyed on the nginx
+  container IP. For per-client buckets, set `FORWARDED_ALLOW_IPS` in the
+  deploy host's `.env` to the frontend container's IP (or the compose
+  network subnet, CIDR) — see the `environment` note in `compose.yaml`.
+  Keep it narrow: the backend port is also published on the host, so a
+  wide trust range lets direct callers spoof XFF to rotate buckets. nginx
+  *sets* (not appends) XFF to `$remote_addr`, so clients can't inject
+  their own value through the proxy.
 
 ### Outbound HTTP / SSRF
 - The price scraper (`prices/scraper.py`) and Apprise notifier reach URLs
