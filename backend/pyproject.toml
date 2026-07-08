@@ -46,10 +46,10 @@ kerotrack = "kerotrack.cli:main"
 where = ["."]
 include = ["kerotrack*"]
 
+# Single pytest config — run the suite from backend/ (`cd backend && python
+# -m pytest`). The old root-level pytest.ini duplicated this and suppressed
+# ALL DeprecationWarnings, hiding upgrade signals (KERO-L2).
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
-filterwarnings = [
-    "ignore::DeprecationWarning:passlib",
-]
 
