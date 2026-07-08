@@ -92,6 +92,15 @@ def test_refills_create_get_delete(client: TestClient) -> None:
     assert client.get("/api/refills").json()["items"] == []
 
 
+def test_refills_reject_malformed_date(client: TestClient) -> None:
+    """Free-form dates used to be accepted and then silently break
+    _match_actual_cost / the manual-refill anchor (KERO-L6)."""
+    for bad in ("25/04/2026", "2026-04-25", "2026-04-25T09:00:00", "soon"):
+        resp = client.post("/api/refills", json={"refill_date": bad})
+        assert resp.status_code == 422, bad
+    assert client.get("/api/refills").json()["items"] == []
+
+
 def test_hdd_empty(client: TestClient) -> None:
     resp = client.get("/api/hdd")
     assert resp.status_code == 200

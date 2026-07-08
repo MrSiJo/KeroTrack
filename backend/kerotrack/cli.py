@@ -12,6 +12,7 @@ from pathlib import Path
 from sqlalchemy import delete, desc, select
 
 from kerotrack.bootstrap import get_bootstrap, reset_bootstrap_cache
+from kerotrack.clock import ensure_canonical_timestamp
 from kerotrack.db import init_engine, session_factory
 from kerotrack.db_migrate import ensure_schema
 from kerotrack.migration.v1_to_v2 import migrate
@@ -147,6 +148,12 @@ def _refill_to_dict(row: ActualRefillCost) -> dict:
 
 
 async def _refill_add(args: argparse.Namespace) -> int:
+    try:
+        ensure_canonical_timestamp(args.refill_date)
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
     async def _do(sf):
         async with sf() as session:
             existing = (

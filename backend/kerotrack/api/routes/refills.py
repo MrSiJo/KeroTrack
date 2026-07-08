@@ -5,9 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from sqlalchemy import delete, desc, select
 
+from kerotrack.clock import ensure_canonical_timestamp
 from kerotrack.models.refill import ActualRefillCost
 
 router = APIRouter(prefix="/api/refills", tags=["refills"])
@@ -22,6 +23,14 @@ class RefillBody(BaseModel):
     notes: str | None = None
     order_date: str | None = None
     order_ref: str | None = None
+
+    @field_validator("refill_date")
+    @classmethod
+    def _refill_date_canonical(cls, value: str) -> str:
+        # A free-form string used to silently break _match_actual_cost and
+        # the manual-refill anchor (parse_local → None → skipped). Fail
+        # loudly at entry instead (KERO-L6).
+        return ensure_canonical_timestamp(value)
 
 
 def _to_dict(row: ActualRefillCost) -> dict[str, Any]:

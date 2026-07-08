@@ -70,3 +70,23 @@ def parse_local(value: str | None, tz: str | None = None) -> datetime | None:
         return dt
     except ValueError:
         return None
+
+
+CANONICAL_FORMAT = "%Y-%m-%d %H:%M:%S"
+
+
+def ensure_canonical_timestamp(value: str) -> str:
+    """Validate a user-supplied timestamp is exactly `YYYY-MM-DD HH:MM:SS`.
+
+    Manual refill dates feed `_match_actual_cost` and the consumption
+    anchor via `parse_local`, which silently returns None on garbage — a
+    malformed date used to be accepted and then quietly skipped downstream
+    (KERO-L6). Raises ValueError so entry points fail loudly instead.
+    """
+    try:
+        datetime.strptime(value, CANONICAL_FORMAT)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"timestamp must be 'YYYY-MM-DD HH:MM:SS', got {value!r}"
+        ) from None
+    return value
