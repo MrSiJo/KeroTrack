@@ -1,0 +1,66 @@
+# Pinned third-party versions for reproducible image builds (KERO-M4).
+# Generated from the dev venv's installed (test-green) versions on 2026-07-08.
+# Used as pip constraints in backend/Dockerfile — compose pulls :latest with
+# pull_policy: always, so without these a rebuild could silently pick up new
+# FastAPI/SQLAlchemy/apprise majors.
+#
+# Regenerate after a deliberate dependency upgrade:
+#   pip freeze (or pip-compile) from a venv where the test suite passes.
+#
+# uvloop (uvicorn[standard], Linux-only) is intentionally unpinned: it is
+# not installable on the Windows dev box this file was generated from.
+aiomqtt==2.5.1
+aiosqlite==0.22.1
+annotated-doc==0.0.4
+annotated-types==0.7.0
+anyio==4.13.0
+apprise==1.11.0
+apscheduler==3.11.2
+argon2-cffi==25.1.0
+argon2-cffi-bindings==25.1.0
+beautifulsoup4==4.15.0
+certifi==2026.5.20
+cffi==2.0.0
+charset-normalizer==3.4.7
+click==8.4.1
+colorama==0.4.6
+cron-converter==1.3.1
+cryptography==49.0.0
+deprecated==1.3.1
+fastapi==0.137.1
+greenlet==3.5.1
+h11==0.16.0
+httpcore==1.0.9
+httptools==0.8.0
+httpx==0.28.1
+idna==3.18
+itsdangerous==2.2.0
+limits==5.8.0
+markdown==3.10.2
+oauthlib==3.3.1
+packaging==26.2
+paho-mqtt==2.1.0
+pycparser==3.0
+pydantic==2.13.4
+pydantic-core==2.46.4
+pydantic-settings==2.14.1
+python-dateutil==2.9.0.post0
+python-dotenv==1.2.2
+pyyaml==6.0.3
+requests==2.34.2
+requests-oauthlib==2.0.0
+six==1.17.0
+slowapi==0.1.10
+soupsieve==2.8.4
+sqlalchemy==2.0.51
+sse-starlette==3.4.4
+starlette==1.3.1
+typing-extensions==4.15.0
+typing-inspection==0.4.2
+tzdata==2026.2
+tzlocal==5.4
+urllib3==2.7.0
+uvicorn==0.49.0
+watchfiles==1.2.0
+websockets==16.0
+wrapt==2.2.1

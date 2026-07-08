@@ -11,10 +11,21 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN useradd --create-home --uid 1000 --shell /bin/bash app
 
 WORKDIR /app
-COPY pyproject.toml ./
-COPY kerotrack ./kerotrack
 
-RUN pip install --upgrade pip && pip install .
+# Dependency layer (KERO-M4): resolve + install the pinned third-party set
+# from pyproject ranges under constraints.txt BEFORE the source copy, so a
+# code-only edit reuses this (slow) layer. The stub package lets pip build
+# the project metadata (and pull extras like uvicorn[standard]) without
+# invalidating the cache on every source change.
+COPY pyproject.toml constraints.txt ./
+RUN mkdir -p kerotrack && touch kerotrack/__init__.py \
+    && pip install --upgrade pip \
+    && pip install --constraint constraints.txt . \
+    && pip uninstall -y kerotrack \
+    && rm -rf kerotrack
+
+COPY kerotrack ./kerotrack
+RUN pip install --no-deps --constraint constraints.txt .
 
 RUN mkdir -p /app/data /app/logs && chown -R app:app /app
 
