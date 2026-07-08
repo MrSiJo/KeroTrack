@@ -1,6 +1,12 @@
 import { describe, it, expect } from "vitest";
 import { buildTimelineEvents, type TimelineEvent } from "./timeline";
 
+// A date safely inside every window used below — relative so the tests
+// don't rot as the wall clock moves past a hardcoded literal.
+const recentDate = new Date(Date.now() - 5 * 24 * 3600 * 1000)
+  .toISOString()
+  .slice(0, 10);
+
 describe("buildTimelineEvents", () => {
   it("returns an empty array for no readings", () => {
     expect(buildTimelineEvents([], 30)).toEqual([]);
@@ -8,7 +14,7 @@ describe("buildTimelineEvents", () => {
 
   it("classifies a refill reading as a refill event", () => {
     const events = buildTimelineEvents(
-      [{ date: "2026-04-01 10:00:00", refill_detected: "y" } as any],
+      [{ date: `${recentDate} 10:00:00`, refill_detected: "y" } as any],
       30,
     );
     expect(events).toHaveLength(1);
@@ -17,7 +23,7 @@ describe("buildTimelineEvents", () => {
 
   it("classifies an anomaly reading as an anomaly event", () => {
     const events = buildTimelineEvents(
-      [{ date: "2026-04-01 10:00:00", anomaly_detected: "y" } as any],
+      [{ date: `${recentDate} 10:00:00`, anomaly_detected: "y" } as any],
       30,
     );
     expect(events[0].kind).toBe("anomaly");
@@ -25,7 +31,7 @@ describe("buildTimelineEvents", () => {
 
   it("classifies a normal reading as a normal event", () => {
     const events = buildTimelineEvents(
-      [{ date: "2026-04-01 10:00:00" } as any],
+      [{ date: `${recentDate} 10:00:00` } as any],
       30,
     );
     expect(events[0].kind).toBe("normal");
