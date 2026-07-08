@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
-  import * as echarts from "echarts";
+  import type * as echarts from "echarts";
 
-  import { KEROTRACK_DARK_THEME } from "$lib/charts/theme";
+  import { useEchart } from "$lib/charts/echart.svelte";
 
   type HistoryPoint = { date: string; litres: number };
 
@@ -25,7 +24,6 @@
   }: Props = $props();
 
   let el: HTMLDivElement | null = $state(null);
-  let chart: echarts.ECharts | null = null;
 
   // Quantile multipliers (z-scores) for normal distribution.
   const Z_INNER = 0.674; // p25 / p75 (≈ IQR)
@@ -316,32 +314,10 @@
     };
   }
 
-  function onResize(): void {
-    chart?.resize();
-  }
-
-  onMount(() => {
-    if (!el) return;
-    chart = echarts.init(el, KEROTRACK_DARK_THEME);
-    chart.setOption(buildOption());
-    window.addEventListener("resize", onResize);
-  });
-
-  onDestroy(() => {
-    window.removeEventListener("resize", onResize);
-    chart?.dispose();
-    chart = null;
-  });
-
-  $effect(() => {
-    // Re-render on prop change.
-    void history;
-    void meanDailyL;
-    void stdDailyL;
-    void horizonDays;
-    void lowOilThresholdL;
-    if (chart) chart.setOption(buildOption(), true);
-  });
+  useEchart(
+    () => el,
+    buildOption,
+  );
 </script>
 
 {#if !history || history.length === 0 || !Number.isFinite(meanDailyL) || meanDailyL <= 0}

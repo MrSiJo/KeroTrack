@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
-  import * as echarts from "echarts";
+  import type * as echarts from "echarts";
 
-  import { KEROTRACK_DARK_THEME } from "$lib/charts/theme";
+  import { useEchart } from "$lib/charts/echart.svelte";
 
   type Bar = { x: string | number; y: number; anomaly?: boolean };
 
@@ -15,7 +14,6 @@
   let { data, yLabel, height = "320px" }: Props = $props();
 
   let el: HTMLDivElement | null = $state(null);
-  let chart: echarts.ECharts | null = null;
 
   const COLOR_NORMAL = "#3b82f6";
   const COLOR_ANOMALY = "#f59e0b";
@@ -61,28 +59,10 @@
     };
   }
 
-  function onResize(): void {
-    chart?.resize();
-  }
-
-  onMount(() => {
-    if (!el) return;
-    chart = echarts.init(el, KEROTRACK_DARK_THEME);
-    chart.setOption(buildOption());
-    window.addEventListener("resize", onResize);
-  });
-
-  onDestroy(() => {
-    window.removeEventListener("resize", onResize);
-    chart?.dispose();
-    chart = null;
-  });
-
-  $effect(() => {
-    void data;
-    void yLabel;
-    if (chart) chart.setOption(buildOption(), true);
-  });
+  useEchart(
+    () => el,
+    buildOption,
+  );
 </script>
 
 {#if !data || data.length === 0}

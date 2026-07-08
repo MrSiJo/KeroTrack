@@ -1,8 +1,7 @@
 <script lang="ts">
-  import { onDestroy, onMount } from "svelte";
-  import * as echarts from "echarts";
+  import type * as echarts from "echarts";
 
-  import { KEROTRACK_DARK_THEME } from "$lib/charts/theme";
+  import { useEchart } from "$lib/charts/echart.svelte";
 
   type Point = { x: string | number; y1: number | null; y2?: number | null };
 
@@ -16,7 +15,6 @@
   let { data, y1Label, y2Label, height = "320px" }: Props = $props();
 
   let el: HTMLDivElement | null = $state(null);
-  let chart: echarts.ECharts | null = null;
 
   function buildOption(): echarts.EChartsOption {
     const xs = data.map((d) => d.x);
@@ -93,30 +91,10 @@
     };
   }
 
-  function onResize(): void {
-    chart?.resize();
-  }
-
-  onMount(() => {
-    if (!el) return;
-    chart = echarts.init(el, KEROTRACK_DARK_THEME);
-    chart.setOption(buildOption());
-    window.addEventListener("resize", onResize);
-  });
-
-  onDestroy(() => {
-    window.removeEventListener("resize", onResize);
-    chart?.dispose();
-    chart = null;
-  });
-
-  $effect(() => {
-    // Re-render when data or labels change
-    void data;
-    void y1Label;
-    void y2Label;
-    if (chart) chart.setOption(buildOption(), true);
-  });
+  useEchart(
+    () => el,
+    buildOption,
+  );
 </script>
 
 {#if !data || data.length === 0}
