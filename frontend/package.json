@@ -26,7 +26,7 @@
     "cron-converter": "^2.1.0",
     "echarts": "^6.1.0",
     "jsdom": "^29.1.1",
-    "postcss": "^8.5.16",
+    "postcss": "^8.5.25",
     "svelte": "^5.56.4",
     "svelte-check": "^4.7.2",
     "tailwindcss": "^3.4.13",
