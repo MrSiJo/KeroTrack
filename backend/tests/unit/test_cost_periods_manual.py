@@ -427,13 +427,14 @@ async def test_log_entry_before_any_reading_is_skipped(
     sf: async_sessionmaker, seeded_settings
 ) -> None:
     """Refills logged years before the sensor existed must not collapse onto
-    the first ever reading."""
+    the first ever reading as a refill: the only boundary is the first
+    reading itself (it opens the partial period), which alone makes no period."""
     await _seed_falling(sf, datetime(2023, 6, 2), datetime(2023, 7, 1))
     async with sf() as session:
         session.add(ActualRefillCost(refill_date="2019-08-15 12:00:00"))
         session.add(ActualRefillCost(refill_date="2023-02-20 12:00:00"))
         await session.commit()
-    assert await _period_boundaries(sf) == []
+    assert await _period_boundaries(sf) == ["2023-06-02 00:00:00"]
 
 
 async def test_log_date_without_jump_uses_reading_within_three_days(
@@ -449,12 +450,13 @@ async def test_log_date_without_jump_uses_reading_within_three_days(
 async def test_log_date_without_jump_or_nearby_reading_is_skipped(
     sf: async_sessionmaker, seeded_settings
 ) -> None:
-    """Readings resume 5 days after the log date, no jump: skipped."""
+    """Readings start 5 days after the log date, no jump: the log date itself
+    is skipped; only the first reading is added (log predates all readings)."""
     await _seed_falling(sf, datetime(2025, 3, 15, 12, 0, 0), datetime(2025, 4, 1))
     async with sf() as session:
         session.add(ActualRefillCost(refill_date="2025-03-10 12:00:00"))
         await session.commit()
-    assert await _period_boundaries(sf) == []
+    assert await _period_boundaries(sf) == ["2025-03-15 12:00:00"]
 
 
 async def test_boundaries_within_a_day_keep_the_earlier(
@@ -486,3 +488,37 @@ async def test_days_since_refill_falls_back_to_latest_boundary(
     assert payload is not None
     assert payload["days_since_refill"] == _days_since("2025-07-01 09:00:00")
     assert payload["days_since_period_end"] == _days_since("2025-07-01 09:00:00")
+
+
+async def test_pre_reading_log_entry_keeps_the_first_partial_period(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    """A log entry years before the first reading means the first reading
+    sits mid period: it becomes a boundary so that period is kept."""
+    await _seed_falling(
+        sf,
+        datetime(2025, 4, 1),
+        datetime(2025, 6, 1),
+        jump_at=datetime(2025, 5, 5, 12, 0, 0),
+    )
+    async with sf() as session:
+        session.add(ActualRefillCost(refill_date="2023-02-20 12:00:00"))
+        session.add(ActualRefillCost(refill_date="2025-05-07 12:00:00"))
+        await session.commit()
+    boundaries = await _period_boundaries(sf)
+    assert boundaries == ["2025-04-01 00:00:00", "2025-05-05 12:00:00"]
+
+
+async def test_no_pre_reading_log_entry_does_not_add_the_first_reading(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    await _seed_falling(
+        sf,
+        datetime(2025, 4, 1),
+        datetime(2025, 6, 1),
+        jump_at=datetime(2025, 5, 5, 12, 0, 0),
+    )
+    async with sf() as session:
+        session.add(ActualRefillCost(refill_date="2025-05-07 12:00:00"))
+        await session.commit()
+    assert await _period_boundaries(sf) == ["2025-05-05 12:00:00"]

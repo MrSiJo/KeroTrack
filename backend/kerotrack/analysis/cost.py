@@ -263,7 +263,9 @@ async def _period_boundaries(
        and the level holds for the next 24 h (see ``_sensor_flag_holds``).
        Real refills that were noise suppressed never set the flag, and
        flapping sets it falsely; the log covers both.
-    3. Boundaries within 1 day of each other collapse onto the earlier.
+    3. When a logged refill predates the earliest trusted reading, that
+       reading is also a boundary (it opens the first, partial period).
+    4. Boundaries within 1 day of each other collapse onto the earlier.
     """
     actuals = await _all_actual_costs(sf)
     manual_dts: list[datetime] = []
@@ -302,6 +304,16 @@ async def _period_boundaries(
             continue
         if await _sensor_flag_holds(sf, reading, refill_threshold_l):
             candidates.add(reading.date)
+
+    # A log entry older than every reading means the first reading sits mid
+    # period: that period is real, so the first reading opens it.
+    if manual_dts:
+        earliest = await _first_trusted_reading_at_or_after(sf, "")
+        earliest_dt = parse_local(earliest.date) if earliest is not None else None
+        if earliest is not None and earliest_dt is not None and any(
+            manual_dt < earliest_dt for manual_dt in manual_dts
+        ):
+            candidates.add(earliest.date)
 
     boundaries: list[str] = []
     last_dt: datetime | None = None

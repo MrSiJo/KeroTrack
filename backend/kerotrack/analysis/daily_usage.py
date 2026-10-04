@@ -11,6 +11,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+MIN_DAYS_PER_MONTH = 20
+MIN_MONTHS_FOR_FREE_FIT = 3
+
 
 @dataclass(frozen=True, slots=True)
 class Point:
@@ -34,6 +37,7 @@ class Calibration:
     mae_l: float | None  # mean abs error of the fixed-hw model, L/day
     days_used: int
     heating_days: int
+    hw_floor_l: float | None = None  # summer floor hot water, used when the free intercept is <= 0
 
 
 def bucket_daily(
@@ -72,7 +76,7 @@ def calibrate(
     fuel_rate_l_per_h: float,
     min_heating_days: int = 30,
 ) -> Calibration:
-    """Fit k (hw fixed) and a free intercept/slope fit of used = a + b * hdd."""
+    """Fit k (hw fixed, daily) and a free fit of used = a + b * hdd (monthly)."""
     pairs = [(d.used_l, hdd_by_day[d.day]) for d in days if d.day in hdd_by_day]
     heating = [(u, h) for u, h in pairs if h > 0]
 
@@ -84,20 +88,42 @@ def calibrate(
             k = sum((u - hw_l_per_day) * h for u, h in heating) / sum_h2
             mae = sum(abs(u - (hw_l_per_day + k * h)) for u, h in pairs) / len(pairs)
 
+    # The free fit runs on calendar month aggregates: tank derived HDD is
+    # almost never zero, so a daily intercept is unidentified.
     free_a: float | None = None
     free_b: float | None = None
-    if len({h for _, h in pairs}) >= 2:
-        n = len(pairs)
-        mean_h = sum(h for _, h in pairs) / n
-        mean_u = sum(u for u, _ in pairs) / n
-        sxx = sum((h - mean_h) ** 2 for _, h in pairs)
+    hw_floor: float | None = None
+    by_month: dict[tuple[int, int], list[tuple[float, float]]] = defaultdict(list)
+    for d in days:
+        if d.day in hdd_by_day:
+            by_month[(d.day.year, d.day.month)].append((d.used_l, hdd_by_day[d.day]))
+    months = [
+        (
+            sum(h for _, h in rows) / len(rows),
+            sum(u for u, _ in rows) / len(rows),
+        )
+        for rows in by_month.values()
+        if len(rows) >= MIN_DAYS_PER_MONTH
+    ]
+    if len(months) >= MIN_MONTHS_FOR_FREE_FIT and len({x for x, _ in months}) >= 2:
+        n = len(months)
+        mean_x = sum(x for x, _ in months) / n
+        mean_y = sum(y for _, y in months) / n
+        sxx = sum((x - mean_x) ** 2 for x, _ in months)
         if sxx > 0:
-            free_b = sum((h - mean_h) * (u - mean_u) for u, h in pairs) / sxx
-            free_a = mean_u - free_b * mean_h
+            free_b = sum((x - mean_x) * (y - mean_y) for x, y in months) / sxx
+            free_a = mean_y - free_b * mean_x
+            if free_a <= 0:
+                # Tank temperature HDD separates hot water from heating
+                # poorly: fall back to the 3 lowest HDD months.
+                low = sorted(months)[:MIN_MONTHS_FOR_FREE_FIT]
+                floor = sum(y - free_b * x for x, y in low) / len(low)
+                hw_floor = max(floor, 0.0)
 
     minutes: float | None = None
-    if free_a is not None and free_a > 0 and slots_per_week > 0 and fuel_rate_l_per_h > 0:
-        minutes = free_a * 7 * 60 / (slots_per_week * fuel_rate_l_per_h)
+    hw_for_minutes = hw_floor if hw_floor is not None else free_a
+    if hw_for_minutes is not None and hw_for_minutes > 0 and slots_per_week > 0 and fuel_rate_l_per_h > 0:
+        minutes = hw_for_minutes * 7 * 60 / (slots_per_week * fuel_rate_l_per_h)
 
     return Calibration(
         k=k,
@@ -108,4 +134,5 @@ def calibrate(
         mae_l=mae,
         days_used=len(pairs),
         heating_days=len(heating),
+        hw_floor_l=hw_floor,
     )
