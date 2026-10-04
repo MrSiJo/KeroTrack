@@ -35,7 +35,7 @@ Update after every wave. If a session dies, resume from the first unchecked task
 | W6 T15 frontend | done | 9c2f164 |
 | Final review | done | 537ee11 (fix wave) |
 | Local DB rehearsal | done | prod copy + live HFD quote |
-| Deploy (backup first) | todo | |
+| Deploy (backup first) | done | images sha-44f5c6c |
 
 Notes log (append, newest last):
 - 2026-10-04: baseline backend 336 passed. gitleaks is blocked on Windows by App Control; commit from WSL (`scratchpad/wslcommit.sh`, hooks via `core.hooksPath=~/kt-hooks`). Never `--no-verify`.
@@ -43,6 +43,7 @@ Notes log (append, newest last):
 - 2026-10-05 early: Wave 2 complete (T10 took 3 fix rounds: refill log dates lag the real jump by ~12 days, so boundaries snap to the confirmed jump). Suite 425 passed. Next: T12.
 - 2026-10-05 ~00:00: all tasks done. Extra T16 (calibration monthly fit + keep first partial cost period) commit 5fc4cc2. Browser check on synthetic DB passed. Final opus review running. Then: push, CI, deploy with backup.
 - 2026-10-05 ~00:15: final opus review found 2 Critical (v1 monthly HDD lumps; httpx logging postcode) + 2 Important, all fixed and re-reviewed. Suite 478 passed. Next: push, CI build, deploy with backup.
+- 2026-10-04 23:12: deployed to docker-host. Backup /dockerdata/backups/kerotrack-20261004-231038 (integrity ok, API stopped). Rollback images tagged kerotrack-api:rollback-20261004 and kerotrack-ui:rollback-20261004. Startup migrated 3 crons, retired yournrg, rebuilt cost periods (2). buying.postcode set (secret, DB only) and buying.trigger_ppl=95. Live HFD quote 577.71 stored, state wait. Owner action: consider boiler.hw_burner_minutes_per_slot=13.5 (see summary).
 
 ## Global Constraints
 
