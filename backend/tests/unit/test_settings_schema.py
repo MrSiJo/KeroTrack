@@ -60,13 +60,38 @@ EXPECTED_KEYS: list[tuple[str, str, str, object, bool]] = [
     ("notifications.apprise_urls", "json", "notifications", [], False),
     ("notifications.weekly_enabled", "bool", "notifications", True, False),
     ("notifications.monthly_enabled", "bool", "notifications", True, False),
-    ("schedule.analysis_cron", "cron", "schedule", "0 6 * * 0", False),
-    ("schedule.cost_analysis_cron", "cron", "schedule", "0 7 * * 0", False),
-    ("schedule.notifier_cron", "cron", "schedule", "0 8 * * 0", False),
+    ("schedule.analysis_cron", "cron", "schedule", "0 6 * * sun", False),
+    ("schedule.cost_analysis_cron", "cron", "schedule", "0 7 * * sun", False),
+    ("schedule.notifier_cron", "cron", "schedule", "0 8 * * *", False),
     ("alerts.low_level_threshold_pct", "float", "alerts", 20.0, False),
     ("currency.symbol", "string", "currency", "£", False),
     ("web.theme_default", "string", "web", "system", False),
     ("web.title", "string", "web", "KeroTrack", False),
+    ("boiler.hw_schedule", "json", "boiler", [
+        {"days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+         "start": "03:00", "hours": 1.0},
+        {"days": ["fri", "sat", "sun"], "start": "16:30", "hours": 1.0},
+    ], False),
+    ("boiler.hw_burner_minutes_per_slot", "float", "boiler", 33.0, False),
+    ("buying.postcode", "secret", "buying", "", True),
+    ("buying.order_litres", "int", "buying", 500, False),
+    ("buying.min_order_litres", "int", "buying", 500, False),
+    ("buying.tanker", "string", "buying", "standard", False),
+    ("buying.providers", "json", "buying", ["homefuelsdirect"], False),
+    ("buying.trigger_ppl", "float", "buying", 0.0, False),
+    ("buying.safe_fill_pct", "float", "buying", 0.95, False),
+    ("buying.warn_days", "int", "buying", 14, False),
+    ("buying.lead_time_days", "int", "buying", 14, False),
+    ("buying.winter_lead_extra_days", "int", "buying", 7, False),
+    ("projection.reserve_l", "float", "projection", 100.0, False),
+    ("projection.active_scenario", "string", "projection", "normal", False),
+    ("projection.scenarios", "json", "projection", {
+        "normal": {},
+        "mild_then_cold": {"11": 0.8, "12": 0.8, "1": 0.8, "2": 1.5},
+        "cold": {"11": 1.3, "12": 1.3, "1": 1.3, "2": 1.3, "3": 1.3},
+    }, False),
+    ("schedule.buying_cron", "cron", "schedule", "0 7,13 * * *", False),
+    ("mqtt.topic_buying", "string", "mqtt", "oiltank/buying", False),
 ]
 
 
@@ -94,4 +119,4 @@ def test_get_setting_def_unknown_raises() -> None:
 
 def test_secret_keys_are_flagged() -> None:
     secrets = {k for k, v in SETTINGS_CATALOGUE.items() if v.is_secret}
-    assert secrets == {"mqtt.password"}
+    assert secrets == {"mqtt.password", "buying.postcode"}

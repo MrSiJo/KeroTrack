@@ -25,6 +25,8 @@ GroupName = Literal[
     "web",
     "alerts",
     "currency",
+    "buying",
+    "projection",
 ]
 
 
@@ -65,6 +67,32 @@ def _entries() -> list[SettingDef]:
 
     # boiler -------------------------------------------------------------
     e += [
+        SettingDef(
+            "boiler.hw_schedule",
+            "json",
+            "boiler",
+            "Hot water schedule",
+            [
+                {
+                    "days": ["mon", "tue", "wed", "thu", "fri", "sat", "sun"],
+                    "start": "03:00",
+                    "hours": 1.0,
+                },
+                {"days": ["fri", "sat", "sun"], "start": "16:30", "hours": 1.0},
+            ],
+            "Timer slots when the boiler heats hot water (days, start, hours).",
+        ),
+        SettingDef(
+            "boiler.hw_burner_minutes_per_slot",
+            "float",
+            "boiler",
+            "Burner minutes per hot water slot",
+            33.0,
+            "Minutes the burner actually fires in one hot water slot.",
+            min_value=0.0,
+            max_value=60.0,
+            step=0.5,
+        ),
         SettingDef("boiler.model", "string", "boiler", "Boiler model", ""),
         SettingDef("boiler.burner", "string", "boiler", "Burner", ""),
         SettingDef("boiler.nozzle", "float", "boiler", "Nozzle (gph)", 0.60),
@@ -281,6 +309,14 @@ def _entries() -> list[SettingDef]:
             "oiltank/cost_analysis",
         ),
         SettingDef(
+            "mqtt.topic_buying",
+            "string",
+            "mqtt",
+            "Buying topic (publish)",
+            "oiltank/buying",
+            "Topic the buy planner publishes its recommendation to.",
+        ),
+        SettingDef(
             "mqtt.timeout_minutes",
             "int",
             "mqtt",
@@ -348,29 +384,156 @@ def _entries() -> list[SettingDef]:
 
     # schedule -----------------------------------------------------------
     e += [
-        # Sunday morning cadence: analysis 06:00 → cost analysis 07:00 →
-        # notifier 08:00. Notifier uses its internal weekly + first-Sunday
-        # predicate for the body so a Sunday-only cron is fine.
+        # Sunday morning cadence: analysis 06:00 -> cost analysis 07:00 ->
+        # notifier 08:00. Day names are used because APScheduler treats a
+        # numeric 0 as Monday, not Sunday. The notifier runs daily and its
+        # internal predicate picks Sunday (weekly) and the first Sunday of
+        # the month (monthly).
         SettingDef(
             "schedule.analysis_cron",
             "cron",
             "schedule",
             "Analysis cron",
-            "0 6 * * 0",
+            "0 6 * * sun",
         ),
         SettingDef(
             "schedule.cost_analysis_cron",
             "cron",
             "schedule",
             "Cost analysis cron",
-            "0 7 * * 0",
+            "0 7 * * sun",
         ),
         SettingDef(
             "schedule.notifier_cron",
             "cron",
             "schedule",
             "Notifier cron",
-            "0 8 * * 0",
+            "0 8 * * *",
+        ),
+        SettingDef(
+            "schedule.buying_cron",
+            "cron",
+            "schedule",
+            "Buy planner cron",
+            "0 7,13 * * *",
+            "When the buy planner refreshes prices and its recommendation.",
+        ),
+    ]
+
+    # buying -------------------------------------------------------------
+    e += [
+        SettingDef(
+            "buying.postcode",
+            "secret",
+            "buying",
+            "Delivery postcode",
+            "",
+            "Postcode used for supplier price quotes. Stored as a secret.",
+            is_secret=True,
+        ),
+        SettingDef(
+            "buying.order_litres",
+            "int",
+            "buying",
+            "Order size (L)",
+            500,
+            "Litres to quote for a typical order.",
+        ),
+        SettingDef(
+            "buying.min_order_litres",
+            "int",
+            "buying",
+            "Minimum order (L)",
+            500,
+            "Smallest order the supplier will deliver.",
+        ),
+        SettingDef(
+            "buying.tanker",
+            "string",
+            "buying",
+            "Tanker type",
+            "standard",
+            "Delivery tanker type to request in quotes.",
+        ),
+        SettingDef(
+            "buying.providers",
+            "json",
+            "buying",
+            "Price providers",
+            ["homefuelsdirect"],
+            "Supplier price providers to query, by identifier.",
+        ),
+        SettingDef(
+            "buying.trigger_ppl",
+            "float",
+            "buying",
+            "Buy trigger (pence per litre)",
+            0.0,
+            "Recommend buying when the price drops to this level. 0 disables.",
+        ),
+        SettingDef(
+            "buying.safe_fill_pct",
+            "float",
+            "buying",
+            "Safe fill fraction",
+            0.95,
+            "Maximum fraction of tank capacity an order may fill.",
+        ),
+        SettingDef(
+            "buying.warn_days",
+            "int",
+            "buying",
+            "Warning horizon (days)",
+            14,
+            "Warn when projected days to reserve fall below this.",
+        ),
+        SettingDef(
+            "buying.lead_time_days",
+            "int",
+            "buying",
+            "Delivery lead time (days)",
+            14,
+            "Typical days from order to delivery.",
+        ),
+        SettingDef(
+            "buying.winter_lead_extra_days",
+            "int",
+            "buying",
+            "Winter extra lead time (days)",
+            7,
+            "Extra lead time added over winter.",
+        ),
+    ]
+
+    # projection ---------------------------------------------------------
+    e += [
+        SettingDef(
+            "projection.reserve_l",
+            "float",
+            "projection",
+            "Reserve level (L)",
+            100.0,
+            "Level treated as empty when projecting run-out.",
+        ),
+        SettingDef(
+            "projection.active_scenario",
+            "string",
+            "projection",
+            "Active scenario",
+            "normal",
+            "Name of the scenario in the scenarios setting to project with.",
+        ),
+        SettingDef(
+            "projection.scenarios",
+            "json",
+            "projection",
+            "Scenarios",
+            {
+                "normal": {},
+                "mild_then_cold": {"11": 0.8, "12": 0.8, "1": 0.8, "2": 1.5},
+                "cold": {"11": 1.3, "12": 1.3, "1": 1.3, "2": 1.3, "3": 1.3},
+            },
+            "Per scenario, a month number to consumption multiplier map.",
         ),
     ]
 
