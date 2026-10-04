@@ -21,6 +21,7 @@ from kerotrack.api.auth_middleware import RequireAuthMiddleware
 from kerotrack.api.csrf import CSRFMiddleware
 from kerotrack.api.errors import install_error_handlers
 from kerotrack.api.rate_limit import limiter
+from kerotrack.logging_config import configure_logging
 from kerotrack.api.routes.admin import router as admin_router
 from kerotrack.api.routes.analysis import router as analysis_router
 from kerotrack.api.routes.auth import router as auth_router
@@ -48,6 +49,7 @@ from kerotrack.settings.service import SettingsService
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     boot = get_bootstrap()
+    configure_logging(boot.log_level)
     engine = init_engine(boot.database_url)
     await ensure_schema(engine)
     sf = session_factory(engine)
