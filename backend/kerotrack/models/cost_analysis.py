@@ -41,3 +41,4 @@ class CostAnalysis(Base):
     )
     energy_efficiency: Mapped[float | None] = mapped_column(Float, nullable=True)
     analysis_data: Mapped[str | None] = mapped_column(Text, nullable=True)
+    days_since_period_end: Mapped[int | None] = mapped_column(Integer, nullable=True)

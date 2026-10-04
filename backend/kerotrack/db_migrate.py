@@ -12,7 +12,8 @@ again on a populated DB both end with the same schema and the same row counts.
 
 from __future__ import annotations
 
-from sqlalchemy.ext.asyncio import AsyncEngine
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from kerotrack.models.base import Base
 
@@ -31,6 +32,43 @@ from kerotrack.models import user as _user  # noqa: F401
 from kerotrack.models import monthly_ppl as _mppl  # noqa: F401
 
 
+_COLUMN_ADDITIONS: dict[str, dict[str, str]] = {
+    "analysis_results": {"heating_estimate_basis": "TEXT"},
+    "cost_analysis": {"days_since_period_end": "INTEGER"},
+}
+_ALLOWED_TYPES = {"TEXT", "INTEGER", "REAL", "FLOAT"}
+
+
+async def ensure_columns(conn: AsyncConnection, table: str, columns: dict[str, str]) -> list[str]:
+    """Idempotently add columns to an existing table.
+
+    Args:
+        conn: Active AsyncConnection in a transaction
+        table: Table name (validated as identifier)
+        columns: Mapping of column name to SQL type
+
+    Returns:
+        List of column names that were added (skips if already present)
+
+    Raises:
+        ValueError: If table or column name is not a valid identifier, or type is not allowed
+    """
+    if not table.isidentifier():
+        raise ValueError(f"bad table name {table!r}")
+    existing = {r[1] for r in (await conn.execute(text(f"PRAGMA table_info({table})"))).all()}  # nosec B608  # noqa: S608
+    added: list[str] = []
+    for name, col_type in columns.items():
+        if name in existing:
+            continue
+        if not name.isidentifier() or col_type not in _ALLOWED_TYPES:
+            raise ValueError(f"bad column spec {name} {col_type}")
+        await conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {col_type}"))  # nosec B608  # noqa: S608
+        added.append(name)
+    return added
+
+
 async def ensure_schema(engine: AsyncEngine) -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        for table, cols in _COLUMN_ADDITIONS.items():
+            await ensure_columns(conn, table, cols)

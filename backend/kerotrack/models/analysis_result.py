@@ -40,3 +40,4 @@ class AnalysisResult(Base):
     seasonal_heating_factor: Mapped[float | None] = mapped_column(Float, nullable=True)
     remaining_days_empty_hdd: Mapped[float | None] = mapped_column(Float, nullable=True)
     remaining_date_empty_hdd: Mapped[str | None] = mapped_column(Text, nullable=True)
+    heating_estimate_basis: Mapped[str | None] = mapped_column(Text, nullable=True)
