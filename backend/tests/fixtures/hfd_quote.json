@@ -1,0 +1,7 @@
+{"id": 1, "Postcode": "ZZ99 9", "Volume": 500, "county": "Testshire",
+ "prices": {
+  "Window1": {"ppl_total_gross": 1.15542, "ppl_total_net": 1.1004, "vatTotal": 27.51, "orderTotalNet": 550.2, "orderTotal": 577.71},
+  "Window2": {"ppl_total_gross": 1.15542, "ppl_total_net": 1.1004, "vatTotal": 27.51, "orderTotalNet": 550.2, "orderTotal": 577.71},
+  "Window3": {"ppl_total_gross": 1.1, "ppl_total_net": 1.05, "vatTotal": 26.25, "orderTotalNet": 525.0, "orderTotal": 551.25},
+  "Window4": {"ppl_total_gross": 0, "ppl_total_net": 0, "vatTotal": 0, "orderTotalNet": 0, "orderTotal": 0}
+ }}
