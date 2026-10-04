@@ -6,21 +6,28 @@ and publishes the full payload to `oiltank/analysis`.
 
 This is the v1 algorithm restored (backlog A1):
 
-1. Hot-water baseline derived from boiler.fuel_rate_l_per_h × 10 scheduled
-   sessions/week × 0.5h ÷ 7 × 1.1 buffer; used as a floor on per-day
-   consumption when HDD=0 so summer days don't deflate the average.
+1. Hot-water baseline from the boiler schedule (spec A3): weekly average of
+   ``boiler.hw_schedule`` slots × ``boiler.hw_burner_minutes_per_slot`` ÷ 60
+   × ``boiler.fuel_rate_l_per_h``; used as a floor on per-day consumption
+   when HDD=0 so summer days don't deflate the average.
 2. Bounded look-back window: ``min(60, max(30, days_since_refill))`` so a
    long post-refill window doesn't get poisoned by stale summer averages.
 3. Per-pair refill-aware walker for `total_consumption` (rejects negative
    spikes greater than `detection.refill_threshold_l`).
-4. Heating estimate blends 7-day vs long-window components (0.65/0.35),
-   scales by `today_HDD/avg_7d_HDD` clamped 0.6-1.6, then clamps the
-   result to [MIN_HEATING_L, MAX_HEATING_L].
+4. Heating estimate = ``k × today's HDD`` (0 when HDD is 0), with ``k``
+   from the projection service's calibration (spec A5);
+   ``heating_estimate_basis`` = ``"model"``. Only when the projection
+   cannot run does the legacy estimate apply (``"legacy"``): 7-day vs
+   long-window blend (0.65/0.35), scaled by `today_HDD/avg_7d_HDD` clamped
+   0.6-1.6, then clamped to [MIN_HEATING_L, MAX_HEATING_L].
 5. Monthly seasonal heating factor from real Nest hours data
    (78,43,43,21,3,0,0,0,0,5,29,37) — April resolves to ~0.27 instead of
    the bucketed 0.7 the first port used.
-6. ``estimated_days_remaining`` capped at 400 (HDD>0) or 700 (HDD=0) so
-   summer scenarios don't produce multi-thousand-day projections.
+6. ``estimated_days_remaining``, ``estimated_empty_date`` and the two
+   ``remaining_*_hdd`` keys come from the ``normal`` seasonal runway
+   projection down to ``projection.reserve_l`` (spec A6); a run out beyond
+   the 365 day horizon reports 700 days and no date. The legacy fallback
+   is the flat rate capped at 400 (HDD>0) or 700 (HDD=0).
 
 Output shape is unchanged — every key in spec §3.2 still present, same
 types, same rounding.
@@ -38,11 +45,13 @@ from sqlalchemy import asc, desc, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kerotrack.analysis.hdd_rollup import aggregate_daily_hdd
+from kerotrack.analysis.hot_water import hw_litres_per_day_avg
 from kerotrack.clock import local_now, local_now_str, parse_local
 from kerotrack.models.analysis_result import AnalysisResult
 from kerotrack.models.hdd import HddDatum
 from kerotrack.models.reading import Reading, trusted_readings_clause
 from kerotrack.models.refill import ActualRefillCost
+from kerotrack.projection.service import ProjectionBundle, load_hw, project
 from kerotrack.publish.mqtt_publisher import MqttPublisher
 from kerotrack.pubsub.bus import PubSubBus
 from kerotrack.settings.service import SettingsService
@@ -61,9 +70,6 @@ LOOKBACK_MIN_DAYS = 30
 LOOKBACK_MAX_DAYS = 60
 DAYS_REMAINING_CAP_HDD = 400.0
 DAYS_REMAINING_CAP_NO_HDD = 700.0
-HW_BUFFER_FACTOR = 1.1
-HW_SESSIONS_PER_WEEK = 10  # 1/day × 4 weekdays + 2/day × 3 weekend days
-HW_SESSION_HOURS = 0.5
 # How many daily hdd_data rows a historical month needs before its total is
 # trusted as the upcoming-month estimate (KERO-L8).
 MIN_HDD_DAYS_FOR_MONTH = 20
@@ -119,12 +125,6 @@ def _seasonal_heating_factor(month: int) -> float:
     if _HEATING_MAX <= 0:
         return 0.0
     return _HEATING_HOURS_BY_MONTH.get(month, 0) / _HEATING_MAX
-
-
-def _hot_water_baseline_l_per_day(fuel_rate_l_per_h: float) -> float:
-    """Estimate scheduled-HW daily consumption with v1's buffer."""
-    base = (HW_SESSIONS_PER_WEEK * HW_SESSION_HOURS * fuel_rate_l_per_h) / 7.0
-    return base * HW_BUFFER_FACTOR
 
 
 async def _latest_reading(sf: async_sessionmaker) -> Reading | None:
@@ -393,9 +393,19 @@ async def compute(
         return None
 
     snap = await _snapshot(svc)
-    daily_hw_l = _hot_water_baseline_l_per_day(snap.fuel_rate_l_per_h)
+    daily_hw_l = hw_litres_per_day_avg(*await load_hw(svc))
 
     latest_dt = parse_local(latest.date) or local_now()
+
+    # Seasonal runway projection (spec A5/A6). A failure here must not
+    # block the analysis: the legacy heating blend and flat rate below
+    # are the fallback.
+    bundle: ProjectionBundle | None
+    try:
+        bundle = await project(sf, svc, now=latest_dt)
+    except Exception:  # noqa: BLE001
+        logger.exception("runway projection failed; using the legacy estimates")
+        bundle = None
 
     # Resolve the last-refill anchor. The operator's manual log
     # (actual_refill_costs) is authoritative — a real refill that lands in
@@ -541,58 +551,76 @@ async def compute(
 
     factor = _seasonal_heating_factor(next_month)
 
-    # Heating estimate: blended 7d/long, scaled by today_HDD/avg_7d_HDD,
-    # clamped to [MIN_HEATING_L, MAX_HEATING_L]. Zero when today_HDD=0.
-    heating_7d = await _heating_estimate(
-        sf,
-        end_dt=latest_dt,
-        days=7,
-        daily_hw_l=daily_hw_l,
-        refill_threshold_l=snap.refill_threshold_l,
-    )
-    heating_long = await _heating_estimate(
-        sf,
-        end_dt=latest_dt,
-        days=lookback_days,
-        daily_hw_l=daily_hw_l,
-        refill_threshold_l=snap.refill_threshold_l,
-    )
-    if heating_7d is not None and heating_long is not None:
-        heating_estimate = (
-            heating_7d * HEATING_BLEND_RECENT
-            + heating_long * HEATING_BLEND_LONG
-        )
-    elif heating_7d is not None:
-        heating_estimate = heating_7d
-    elif heating_long is not None:
-        heating_estimate = heating_long
+    if bundle is not None:
+        # Spec A5: k × today's HDD, zero on a no-heating day.
+        heating_estimate_basis = "model"
+        heating_l = bundle.k * today_hdd if today_hdd > 0 else 0.0
     else:
-        heating_estimate = 0.0
+        # Legacy heating estimate: blended 7d/long, scaled by
+        # today_HDD/avg_7d_HDD, clamped to [MIN_HEATING_L, MAX_HEATING_L].
+        # Zero when today_HDD=0.
+        heating_estimate_basis = "legacy"
+        heating_7d = await _heating_estimate(
+            sf,
+            end_dt=latest_dt,
+            days=7,
+            daily_hw_l=daily_hw_l,
+            refill_threshold_l=snap.refill_threshold_l,
+        )
+        heating_long = await _heating_estimate(
+            sf,
+            end_dt=latest_dt,
+            days=lookback_days,
+            daily_hw_l=daily_hw_l,
+            refill_threshold_l=snap.refill_threshold_l,
+        )
+        if heating_7d is not None and heating_long is not None:
+            heating_estimate = (
+                heating_7d * HEATING_BLEND_RECENT
+                + heating_long * HEATING_BLEND_LONG
+            )
+        elif heating_7d is not None:
+            heating_estimate = heating_7d
+        elif heating_long is not None:
+            heating_estimate = heating_long
+        else:
+            heating_estimate = 0.0
 
-    surplus_l = max(recent_daily - daily_hw_l, 0.0)
-    heating_l = heating_estimate if heating_estimate > 0 else surplus_l
-    if today_hdd == 0:
-        heating_l = 0.0
-    elif heating_l > 0:
-        if avg_7d_hdd > 0:
-            scale = _clamp(today_hdd / avg_7d_hdd, HDD_SCALE_MIN, HDD_SCALE_MAX)
-            heating_l = heating_l * scale
-        heating_l = _clamp(heating_l, MIN_HEATING_L, MAX_HEATING_L)
+        surplus_l = max(recent_daily - daily_hw_l, 0.0)
+        heating_l = heating_estimate if heating_estimate > 0 else surplus_l
+        if today_hdd == 0:
+            heating_l = 0.0
+        elif heating_l > 0:
+            if avg_7d_hdd > 0:
+                scale = _clamp(today_hdd / avg_7d_hdd, HDD_SCALE_MIN, HDD_SCALE_MAX)
+                heating_l = heating_l * scale
+            heating_l = _clamp(heating_l, MIN_HEATING_L, MAX_HEATING_L)
 
     estimated_daily_consumption_hdd = max(daily_hw_l + heating_l, daily_hw_l)
     avg_daily_consumption_l = max(adjusted_daily, daily_hw_l)
     avg_daily_consumption_l = max(avg_daily_consumption_l, MIN_CONSUMPTION_L_PER_DAY)
 
-    latest_litres = float(latest.litres_remaining or 0)
-    if avg_daily_consumption_l > 0:
-        raw_days_remaining = latest_litres / avg_daily_consumption_l
-        cap = DAYS_REMAINING_CAP_HDD if today_hdd > 0 else DAYS_REMAINING_CAP_NO_HDD
-        estimated_days_remaining = min(raw_days_remaining, cap)
-        empty_dt = latest_dt + timedelta(days=estimated_days_remaining)
-        empty_date = empty_dt.strftime("%Y-%m-%d %H:%M:%S")
+    empty_date: str | None
+    if bundle is not None:
+        # Spec A6: the normal seasonal projection to the reserve level.
+        run_out = bundle.outcomes["normal"].run_out
+        if run_out is not None:
+            estimated_days_remaining = float((run_out - latest_dt.date()).days)
+            empty_date = f"{run_out.isoformat()} 00:00:00"
+        else:
+            estimated_days_remaining = float(DAYS_REMAINING_CAP_NO_HDD)
+            empty_date = None
     else:
-        estimated_days_remaining = 0.0
-        empty_date = None
+        latest_litres = float(latest.litres_remaining or 0)
+        if avg_daily_consumption_l > 0:
+            raw_days_remaining = latest_litres / avg_daily_consumption_l
+            cap = DAYS_REMAINING_CAP_HDD if today_hdd > 0 else DAYS_REMAINING_CAP_NO_HDD
+            estimated_days_remaining = min(raw_days_remaining, cap)
+            empty_dt = latest_dt + timedelta(days=estimated_days_remaining)
+            empty_date = empty_dt.strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            estimated_days_remaining = 0.0
+            empty_date = None
 
     payload: dict[str, Any] = {
         "latest_reading_date": latest.date,
@@ -612,6 +640,7 @@ async def compute(
         "seasonal_heating_factor": round(factor, 3),
         "remaining_days_empty_hdd": round(estimated_days_remaining, 1),
         "remaining_date_empty_hdd": empty_date,
+        "heating_estimate_basis": heating_estimate_basis,
     }
     return payload
 

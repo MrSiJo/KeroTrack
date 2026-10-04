@@ -3,25 +3,29 @@
 Covers the v1 algorithm restoration (backlog A1):
 - Hot-water baseline floor on warm/zero-HDD days
 - Bounded look-back (30-60 days) when post-refill window is long
-- Heating estimate clamps (MIN 0.5 / MAX 15 L/day)
 - Monthly seasonal heating factor table from real Nest hours data
-- estimated_days_remaining cap (400 with HDD, 700 without)
+- estimated_days_remaining cap (700 when the projection never reaches reserve)
 - Per-pair refill-aware walker for total_consumption
+
+And the buy planner changes (spec A3, A5, A6): hot water from the boiler
+schedule, heating as ``k x today's HDD`` (``heating_estimate_basis="model"``)
+and the runway keys taken from the ``normal`` seasonal projection.
 """
 
 from __future__ import annotations
+
+from datetime import datetime, timedelta
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kerotrack.analysis.consumption import (
-    MAX_HEATING_L,
-    MIN_HEATING_L,
-    _hot_water_baseline_l_per_day,
     _seasonal_heating_factor,
     compute,
     run_analysis,
 )
+from kerotrack.analysis.hot_water import hw_litres_per_day_avg
+from kerotrack.projection.service import DEFAULT_K, load_hw, project
 from kerotrack.models.hdd import HddDatum
 from kerotrack.models.reading import Reading
 from kerotrack.models.refill import ActualRefillCost
@@ -50,6 +54,7 @@ REQUIRED_KEYS = {
     "seasonal_heating_factor",
     "remaining_days_empty_hdd",
     "remaining_date_empty_hdd",
+    "heating_estimate_basis",
 }
 
 
@@ -263,12 +268,14 @@ async def test_seasonal_heating_factor_uses_real_nest_data() -> None:
     assert _seasonal_heating_factor(11) == pytest.approx(29 / 78, abs=0.001)
 
 
-async def test_hot_water_baseline_matches_v1_formula() -> None:
-    # v1: (10 sessions/week × 0.5h × fuel_rate_l_per_h) / 7 × 1.1
-    # With fuel_rate=2.33: (10 × 0.5 × 2.33) / 7 × 1.1 ≈ 1.831
-    assert _hot_water_baseline_l_per_day(2.33) == pytest.approx(1.831, abs=0.01)
-    # Doubling fuel rate doubles the baseline.
-    assert _hot_water_baseline_l_per_day(4.66) == pytest.approx(3.661, abs=0.01)
+async def test_hot_water_from_default_schedule_matches_v1_figure(seeded_settings) -> None:
+    # Spec A3: the default schedule (10 slots/week x 33 burner minutes at
+    # 2.33 L/h) reproduces v1's 1.83 L/day, so upgrading changes nothing
+    # until calibrated. Replaces the old HW_* constant formula test.
+    schedule, minutes, rate = await load_hw(seeded_settings)
+    assert hw_litres_per_day_avg(schedule, minutes, rate) == pytest.approx(1.831, abs=0.01)
+    # Doubling the fuel rate doubles the figure.
+    assert hw_litres_per_day_avg(schedule, minutes, rate * 2) == pytest.approx(3.661, abs=0.01)
 
 
 async def test_hot_water_floor_applied_on_zero_hdd_summer_day(
@@ -313,10 +320,12 @@ async def test_hot_water_floor_applied_on_zero_hdd_summer_day(
     assert payload["estimated_daily_heating_consumption_l"] == pytest.approx(0.0)
 
 
-async def test_heating_estimate_clamped_to_max(
+async def test_heating_estimate_is_k_times_today_hdd(
     sf: async_sessionmaker, seeded_settings
 ) -> None:
-    """A spike on a single day shouldn't produce > MAX_HEATING_L heating."""
+    """Spec A5: heating = k x today's HDD, not the old blend clamped to
+    15 L/day. Seven heating days are too few to fit k, so the default k
+    applies: 0.16 x 15 HDD = 2.4 L/day despite the 50 L/day drops."""
     async with sf() as session:
         # Refill, then a sequence with one extreme drop.
         session.add(
@@ -346,15 +355,18 @@ async def test_heating_estimate_clamped_to_max(
 
     payload = await compute(sf, seeded_settings)
     assert payload is not None
-    # Heating component is clamped between MIN and MAX.
-    assert payload["estimated_daily_heating_consumption_l"] <= MAX_HEATING_L
-    assert payload["estimated_daily_heating_consumption_l"] >= 0.0
+    assert payload["heating_estimate_basis"] == "model"
+    assert payload["estimated_daily_heating_consumption_l"] == pytest.approx(DEFAULT_K * 15.0)
+    assert payload["estimated_daily_consumption_hdd_l"] == pytest.approx(
+        payload["estimated_daily_hot_water_consumption_l"] + DEFAULT_K * 15.0, abs=0.02
+    )
 
 
 async def test_estimated_days_remaining_capped_in_summer(
     sf: async_sessionmaker, seeded_settings
 ) -> None:
-    """When today_HDD=0 the cap is 700 days; with HDD>0 it's 400."""
+    """A projection that never reaches reserve inside its 365 day horizon
+    reports the 700 day no-HDD cap and no empty date."""
     async with sf() as session:
         # Mid-summer, tiny consumption, lots of oil.
         session.add(
@@ -384,7 +396,9 @@ async def test_estimated_days_remaining_capped_in_summer(
     payload = await compute(sf, seeded_settings)
     assert payload is not None
     # Without the cap this would be many thousands of days.
-    assert payload["estimated_days_remaining"] <= 700.0
+    assert payload["estimated_days_remaining"] == pytest.approx(700.0)
+    assert payload["estimated_empty_date"] is None
+    assert payload["remaining_date_empty_hdd"] is None
 
 
 async def test_avg_daily_uses_simple_weekly_delta_not_per_pair_sum(
@@ -508,3 +522,90 @@ async def test_per_pair_walker_ignores_refill_spikes(
     assert payload["total_consumption_since_refill"] <= 30.0
     # avg_daily must be positive and around 5 L/day.
     assert payload["avg_daily_consumption_l"] >= 1.5
+
+
+# --- Buy planner: model heating and seasonal runway (spec A5, A6) ------------
+
+async def _seed_low_tank(sf: async_sessionmaker, *, today_hdd: float = 0.0) -> datetime:
+    """Ten summer days falling 1 L/day to a latest level of 403 L."""
+    latest = datetime(2026, 8, 31, 9, 0)
+    async with sf() as session:
+        for i in range(10):
+            when = latest - timedelta(days=9 - i)
+            session.add(
+                Reading(
+                    date=when.strftime("%Y-%m-%d %H:%M:%S"),
+                    id="probe",
+                    litres_remaining=412.0 - i,
+                    refill_detected="n",
+                    leak_detected="n",
+                )
+            )
+            hdd = today_hdd if i == 9 else 0.0
+            session.add(HddDatum(date=when.strftime("%Y-%m-%d"), hdd=hdd))
+        await session.commit()
+    return latest
+
+
+async def test_model_basis_and_zero_heating_on_zero_hdd(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    await _seed_low_tank(sf)
+    payload = await compute(sf, seeded_settings)
+    assert payload is not None
+    assert payload["heating_estimate_basis"] == "model"
+    assert payload["estimated_daily_heating_consumption_l"] == 0
+    assert payload["estimated_daily_hot_water_consumption_l"] == pytest.approx(1.83, abs=0.01)
+
+
+async def test_empty_date_comes_from_seasonal_projection(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    """403 L with a 100 L reserve at ~1.83 L/day runs out in ~166 days. The
+    old flat rate divided all 403 L by 1.83 (~220 days, to empty not reserve)."""
+    latest = await _seed_low_tank(sf)
+    payload = await compute(sf, seeded_settings)
+    assert payload is not None
+
+    bundle = await project(sf, seeded_settings, now=latest)
+    assert bundle is not None
+    run_out = bundle.outcomes["normal"].run_out
+    assert run_out is not None
+    days = (run_out - latest.date()).days
+    assert payload["estimated_empty_date"] == f"{run_out.isoformat()} 00:00:00"
+    assert payload["remaining_date_empty_hdd"] == payload["estimated_empty_date"]
+    assert payload["estimated_days_remaining"] == pytest.approx(days)
+    assert payload["remaining_days_empty_hdd"] == pytest.approx(days)
+    assert 164 <= days <= 168
+    # Not the old latest / 1.83 flat rate.
+    old_flat_days = 403.0 / 1.831
+    assert abs(payload["estimated_days_remaining"] - old_flat_days) > 30
+
+
+async def test_heating_uses_projection_k_when_today_is_cold(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    await _seed_low_tank(sf, today_hdd=10.0)
+    payload = await compute(sf, seeded_settings)
+    assert payload is not None
+    assert payload["heating_estimate_basis"] == "model"
+    assert payload["estimated_daily_heating_consumption_l"] == pytest.approx(DEFAULT_K * 10.0)
+
+
+async def test_projection_failure_falls_back_to_legacy(
+    sf: async_sessionmaker, seeded_settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import kerotrack.analysis.consumption as consumption
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("projection exploded")
+
+    monkeypatch.setattr(consumption, "project", boom)
+    latest = await _seed_low_tank(sf)
+    payload = await compute(sf, seeded_settings)
+    assert payload is not None
+    assert payload["heating_estimate_basis"] == "legacy"
+    # Legacy flat rate: 403 L / max(weekly avg, 1.83 L/day hot water).
+    assert payload["estimated_days_remaining"] == pytest.approx(403.0 / 1.83, abs=1.0)
+    expected = latest + timedelta(days=payload["estimated_days_remaining"])
+    assert payload["estimated_empty_date"][:10] == expected.strftime("%Y-%m-%d")
