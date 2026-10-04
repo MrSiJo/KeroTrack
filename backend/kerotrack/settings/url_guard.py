@@ -4,9 +4,9 @@ The security contract (CLAUDE.md → "Outbound HTTP / SSRF") requires scheme
 validation plus an allowlist where feasible for any user-supplied URL the
 backend will fetch. Two settings feed outbound fetches:
 
-- ``prices.boilerjuice_url`` / ``prices.yournrg_url`` — the price scraper
-  GETs these directly. They are ordinary public web pages, so we pin them to
-  ``http``/``https`` and allowlist the known price-provider hostnames.
+- ``prices.boilerjuice_url`` — the price scraper GETs this directly. It is
+  an ordinary public web page, so we pin it to ``http``/``https`` and
+  allowlist the known price-provider hostname.
 - ``notifications.apprise_urls`` — a JSON list of Apprise targets. Apprise
   uses its own scheme zoo (``gotify://``, ``mailto://`` …), so we cannot
   allowlist a domain set; instead we reject schemes that would let the
@@ -33,7 +33,6 @@ _WEB_SCHEMES = {"http", "https"}
 # SSRF attempt, so we pin them.
 _PRICE_ALLOWLIST: dict[str, set[str]] = {
     "prices.boilerjuice_url": {"www.boilerjuice.com", "boilerjuice.com"},
-    "prices.yournrg_url": {"www.yournrg.co.uk", "yournrg.co.uk"},
 }
 
 # Apprise schemes that ride over HTTP(S) to an arbitrary host — these are the
@@ -165,7 +164,6 @@ def validate_apprise_urls(key: str, value: object) -> None:
 # Dispatch table keyed on setting key — empty for keys with no URL guard.
 _VALIDATORS = {
     "prices.boilerjuice_url": validate_price_url,
-    "prices.yournrg_url": validate_price_url,
 }
 
 

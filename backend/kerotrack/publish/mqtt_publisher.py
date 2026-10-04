@@ -22,7 +22,7 @@ class _Publishable(Protocol):
 
 
 class MqttPublisher:
-    """Publishes to oiltank/level, oiltank/analysis, oiltank/cost_analysis.
+    """Publishes to oiltank/level, oiltank/analysis, oiltank/cost_analysis, oiltank/buying.
 
     `client` is duck-typed: anything with `publish(topic, payload, retain=)`
     works (used by the test suite to inject a recorder).
@@ -35,11 +35,13 @@ class MqttPublisher:
         topic_level: str = "oiltank/level",
         topic_analysis: str = "oiltank/analysis",
         topic_costanalysis: str = "oiltank/cost_analysis",
+        topic_buying: str = "oiltank/buying",
     ) -> None:
         self._client = client
         self._topic_level = topic_level
         self._topic_analysis = topic_analysis
         self._topic_costanalysis = topic_costanalysis
+        self._topic_buying = topic_buying
 
     async def publish_level(self, payload: dict[str, Any]) -> None:
         body = json.dumps(payload)
@@ -52,3 +54,7 @@ class MqttPublisher:
     async def publish_costanalysis(self, payload: dict[str, Any]) -> None:
         body = json.dumps(payload)
         await self._client.publish(self._topic_costanalysis, body, retain=True)
+
+    async def publish_buying(self, payload: dict[str, Any]) -> None:
+        body = json.dumps(payload)
+        await self._client.publish(self._topic_buying, body, retain=True)

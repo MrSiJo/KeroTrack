@@ -268,11 +268,13 @@ class MqttIngest:
         topic_level = str(await self._settings.get("mqtt.topic_readings_publish"))
         topic_analysis = str(await self._settings.get("mqtt.topic_analytics"))
         topic_costanalysis = str(await self._settings.get("mqtt.topic_costanalysis"))
+        topic_buying = str(await self._settings.get("mqtt.topic_buying"))
         self.publisher = MqttPublisher(
             client=self._adapter,
             topic_level=topic_level,
             topic_analysis=topic_analysis,
             topic_costanalysis=topic_costanalysis,
+            topic_buying=topic_buying,
         )
 
     def stop(self) -> None:

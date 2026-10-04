@@ -54,3 +54,13 @@ async def test_poll_html_body_is_no_prices():
     async with httpx.AsyncClient() as c:
         res = await poll(c, REQ, ["homefuelsdirect"])
     assert res[0].options == [] and res[0].error
+
+
+@respx.mock
+async def test_poll_error_never_contains_postcode():
+    respx.get("https://homefuelsdirect.co.uk/index.php").respond(status_code=500)
+    async with httpx.AsyncClient() as c:
+        res = await poll(c, REQ, ["homefuelsdirect"])
+    err = res[0].error
+    assert "HTTPStatusError" in err
+    assert "ZZ99" not in err and "pcode" not in err

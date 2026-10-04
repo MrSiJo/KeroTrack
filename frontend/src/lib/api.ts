@@ -4,6 +4,9 @@
 
 import type {
   AnalysisResult,
+  BuyingCalibration,
+  BuyingQuote,
+  BuyingSummary,
   HealthPayload,
   LoginResponse,
   Reading,
@@ -197,6 +200,14 @@ export const api = {
       "POST",
       `/api/settings/${encodeURIComponent(key)}/reset`,
     ),
+
+  // ----- buying planner --------------------------------------------
+  getBuyingSummary: () => request<BuyingSummary>("GET", "/api/buying/summary"),
+  getBuyingQuotes: (days = 90) =>
+    request<{ items: BuyingQuote[] }>("GET", `/api/buying/quotes?days=${days}`),
+  runBuying: () => request<BuyingSummary>("POST", "/api/buying/run", {}),
+  calibrateBuying: () =>
+    request<BuyingCalibration>("POST", "/api/buying/calibrate", {}),
 
   // ----- admin ------------------------------------------------------
   runJob: (name: string, opts: { test?: boolean } = {}) =>

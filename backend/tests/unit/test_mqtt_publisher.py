@@ -65,3 +65,20 @@ async def test_topic_overrides_apply() -> None:
     await pub.publish_costanalysis({"z": 3})
     topics = [c[0] for c in rec.calls]
     assert topics == ["custom/level", "custom/analysis", "custom/cost"]
+
+
+async def test_publish_buying_default_topic_retained() -> None:
+    rec = _RecorderClient()
+    pub = MqttPublisher(client=rec)
+    await pub.publish_buying({"state": "wait", "best_total": None})
+    topic, body, retain = rec.calls[0]
+    assert topic == "oiltank/buying"
+    assert retain is True
+    assert json.loads(body) == {"state": "wait", "best_total": None}
+
+
+async def test_publish_buying_topic_override() -> None:
+    rec = _RecorderClient()
+    pub = MqttPublisher(client=rec, topic_buying="custom/buying")
+    await pub.publish_buying({"state": "wait"})
+    assert rec.calls[0][0] == "custom/buying"

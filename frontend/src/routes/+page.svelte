@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from "svelte";
 
+  import BuyingBadge from "$lib/components/BuyingBadge.svelte";
   import HeroCosts from "$lib/components/HeroCosts.svelte";
   import HeroForecast from "$lib/components/HeroForecast.svelte";
   import HeroMqtt from "$lib/components/HeroMqtt.svelte";
@@ -19,6 +20,7 @@
 </script>
 
 <div class="grid grid-cols-12 gap-4">
+  <div class="col-span-12"><BuyingBadge /></div>
   <section class="col-span-12 lg:col-span-5">
     <TankHeroPanel />
   </section>

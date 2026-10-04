@@ -31,6 +31,8 @@ from kerotrack.models import cost_analysis as _ca  # noqa: F401
 from kerotrack.models import user as _user  # noqa: F401
 from kerotrack.models import monthly_ppl as _mppl  # noqa: F401
 from kerotrack.models import runway_projection as _rwp  # noqa: F401
+from kerotrack.models import price_quote as _pq  # noqa: F401
+from kerotrack.models import buying_state as _bs  # noqa: F401
 
 
 _COLUMN_ADDITIONS: dict[str, dict[str, str]] = {

@@ -11,10 +11,8 @@ import respx
 
 from kerotrack.prices.cache import PriceCache
 from kerotrack.prices.scraper import (
-    YOURNRG_API_PATH,
     fetch_boilerjuice,
     fetch_current_price,
-    fetch_yournrg,
 )
 
 
@@ -22,8 +20,6 @@ pytestmark = pytest.mark.asyncio
 
 
 BJ_URL = "https://www.boilerjuice.com/heating-oil-prices-england/"
-YN_URL = "https://yournrg.co.uk/domestic/heating-oil-prices"
-YN_API = "https://yournrg.co.uk" + YOURNRG_API_PATH
 
 
 def _bj_html(ppl: float = 78.5) -> str:
@@ -39,15 +35,6 @@ def _bj_html(ppl: float = 78.5) -> str:
       </h5>
     </body></html>
     """
-
-
-def _yn_payload(ppl_500: float = 104.52, ppl_750: float = 104.33, ppl_1000: float = 105.18):
-    return [
-        {"Litres": 500, "AveragePrice": ppl_500, "YesterdayClose": ppl_500 - 0.1},
-        {"Litres": 750, "AveragePrice": ppl_750, "YesterdayClose": ppl_750 - 0.1},
-        {"Litres": 1000, "AveragePrice": ppl_1000, "YesterdayClose": ppl_1000 - 0.1},
-        {"Litres": 2000, "AveragePrice": ppl_1000 - 0.3, "YesterdayClose": ppl_1000 - 0.4},
-    ]
 
 
 # -------------------------------------------------------- BoilerJuice parsing
@@ -81,49 +68,18 @@ async def test_fetch_boilerjuice_rejects_implausible_value() -> None:
     assert ppl is None
 
 
-# -------------------------------------------------------- YourNRG parsing
-
-
-@respx.mock
-async def test_fetch_yournrg_parses_500_750_1000() -> None:
-    respx.get(YN_API).respond(json=_yn_payload(104.52, 104.33, 105.18))
-    async with httpx.AsyncClient() as client:
-        result = await fetch_yournrg(client, YN_URL)
-    assert result is not None
-    assert result.ppl_500l == 104.52
-    assert result.ppl_750l == 104.33
-    assert result.ppl_1000l == 105.18
-
-
-@respx.mock
-async def test_fetch_yournrg_returns_none_on_unexpected_payload() -> None:
-    respx.get(YN_API).respond(json={"oops": True})
-    async with httpx.AsyncClient() as client:
-        assert await fetch_yournrg(client, YN_URL) is None
-
-
-@respx.mock
-async def test_fetch_yournrg_returns_none_when_litres_missing() -> None:
-    # Only a 2000 L entry — no headline 500/750/1000.
-    respx.get(YN_API).respond(json=[{"Litres": 2000, "AveragePrice": 99.0}])
-    async with httpx.AsyncClient() as client:
-        assert await fetch_yournrg(client, YN_URL) is None
-
-
 # -------------------------------------------------------- combined fetch
 
 
 @respx.mock
-async def test_fetch_current_price_uses_boilerjuice_first(tmp_path: Path) -> None:
+async def test_fetch_current_price_scrapes_boilerjuice(tmp_path: Path) -> None:
     cache = PriceCache(tmp_path / "cache.json", ttl_seconds=60)
     respx.get(BJ_URL).respond(content=_bj_html(106.95).encode())
-    respx.get(YN_API).respond(json=_yn_payload())
     async with httpx.AsyncClient() as client:
         result = await fetch_current_price(
             client=client,
             cache=cache,
             boilerjuice_url=BJ_URL,
-            yournrg_url=YN_URL,
             retries=1,
             retry_delay=0.0,
         )
@@ -132,25 +88,25 @@ async def test_fetch_current_price_uses_boilerjuice_first(tmp_path: Path) -> Non
     assert result.used_cache is False
     saved = json.loads(cache.path.read_text())
     assert saved["ppl"] == 106.95
-    assert saved["yournrg"]["ppl_500l"] == 104.52
+    assert saved["source"] == "boilerjuice"
+    assert saved["boilerjuice"] == {"ppl": 106.95, "ok": True}
+    assert "yournrg" not in saved
 
 
 @respx.mock
-async def test_fetch_current_price_falls_back_to_yournrg(tmp_path: Path) -> None:
+async def test_fetch_current_price_total_failure_without_cache(tmp_path: Path) -> None:
     cache = PriceCache(tmp_path / "cache.json", ttl_seconds=60)
     respx.get(BJ_URL).respond(status_code=503)
-    respx.get(YN_API).respond(json=_yn_payload(104.52, 104.33, 105.18))
     async with httpx.AsyncClient() as client:
         result = await fetch_current_price(
             client=client,
             cache=cache,
             boilerjuice_url=BJ_URL,
-            yournrg_url=YN_URL,
             retries=1,
             retry_delay=0.0,
         )
-    assert result.ppl == 104.52
-    assert result.source == "yournrg"
+    assert result.ppl is None
+    assert result.fetch_failed is True
 
 
 @respx.mock
@@ -166,13 +122,11 @@ async def test_fetch_current_price_uses_stale_cache_on_total_failure(
         }
     )
     respx.get(BJ_URL).respond(status_code=503)
-    respx.get(YN_API).respond(status_code=503)
     async with httpx.AsyncClient() as client:
         result = await fetch_current_price(
             client=client,
             cache=cache,
             boilerjuice_url=BJ_URL,
-            yournrg_url=YN_URL,
             retries=2,
             retry_delay=0.0,
         )
@@ -198,7 +152,6 @@ async def test_fresh_cache_short_circuits(tmp_path: Path) -> None:
             client=client,
             cache=cache,
             boilerjuice_url=BJ_URL,
-            yournrg_url=YN_URL,
             retries=1,
             retry_delay=0.0,
         )
@@ -215,13 +168,11 @@ async def test_retry_succeeds_on_second_attempt(tmp_path: Path) -> None:
             httpx.Response(200, content=_bj_html(79.0)),
         ]
     )
-    respx.get(YN_API).respond(json=_yn_payload())
     async with httpx.AsyncClient() as client:
         result = await fetch_current_price(
             client=client,
             cache=cache,
             boilerjuice_url=BJ_URL,
-            yournrg_url=YN_URL,
             retries=2,
             retry_delay=0.0,
         )

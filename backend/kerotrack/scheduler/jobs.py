@@ -7,13 +7,14 @@ from typing import Any
 
 from kerotrack.analysis.consumption import run_analysis as _run_analysis
 from kerotrack.analysis.cost import run_cost_analysis as _run_cost_analysis
+from kerotrack.buying.service import run_buying
 from kerotrack.ingest.raw_capture import sweep_raw_captures
 from kerotrack.notifier.apprise_notifier import run as _run_notifier
 
 logger = logging.getLogger(__name__)
 
 
-JOB_NAMES = ("analysis", "cost_analysis", "notifier")
+JOB_NAMES = ("analysis", "cost_analysis", "notifier", "buying")
 
 
 async def run_job(name: str, *, app_state) -> Any:
@@ -49,4 +50,13 @@ async def run_job(name: str, *, app_state) -> Any:
         return result
     if name == "notifier":
         return await _run_notifier(sf=sf, settings_service=svc)
+    if name == "buying":
+        # MQTT is optional for this job: run_buying skips the publish
+        # when no publisher is available.
+        return await run_buying(
+            sf=sf,
+            settings_service=svc,
+            publisher=publisher,
+            prices=getattr(app_state, "prices", None),
+        )
     raise ValueError(f"unknown job: {name}")

@@ -8,6 +8,7 @@
     { href: "/trends", label: "Trends", chord: "g t" },
     { href: "/forecast", label: "Forecast", chord: "g f" },
     { href: "/costs", label: "Costs", chord: "g c" },
+    { href: "/buying", label: "Buying", chord: "" },
     { href: "/records", label: "Records", chord: "g r" },
     { href: "/mqtt", label: "MQTT", chord: "g m" },
     { href: "/settings", label: "Settings", chord: "g s" },

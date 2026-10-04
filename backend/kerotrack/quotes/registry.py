@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import httpx
 
 from kerotrack.quotes.homefuelsdirect import HomeFuelsDirect
@@ -10,8 +12,12 @@ from kerotrack.quotes.models import PollResult, QuoteRequest
 PROVIDERS: dict[str, object] = {"homefuelsdirect": HomeFuelsDirect()}
 
 
+_QUERY = re.compile(r"\?[^\s'\"]*")
+
+
 def _err(e: Exception) -> str:
-    return type(e).__name__ + ": " + str(e)[:120]
+    """Error text for storage; URL query strings (which carry the postcode) are scrubbed."""
+    return type(e).__name__ + ": " + _QUERY.sub("?<redacted>", str(e))[:120]
 
 
 async def poll(client: httpx.AsyncClient, req: QuoteRequest, names: list[str]) -> list[PollResult]:

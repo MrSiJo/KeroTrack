@@ -9,6 +9,7 @@ when settings change.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -25,6 +26,7 @@ from kerotrack.logging_config import configure_logging
 from kerotrack.api.routes.admin import router as admin_router
 from kerotrack.api.routes.analysis import router as analysis_router
 from kerotrack.api.routes.auth import router as auth_router
+from kerotrack.api.routes.buying import router as buying_router
 from kerotrack.api.routes.costs import router as costs_router
 from kerotrack.api.routes.hdd import router as hdd_router
 from kerotrack.api.routes.health import router as health_router
@@ -35,11 +37,13 @@ from kerotrack.api.routes.settings import router as settings_router
 from kerotrack.api.routes.status import router as status_router
 from kerotrack.api.routes.stream import router as stream_router
 from kerotrack.bootstrap import get_bootstrap
+from kerotrack.clock import local_now
 from kerotrack.db import init_engine, session_factory
 from kerotrack.db_migrate import ensure_schema
 from kerotrack.ingest.mqtt import MqttIngest
 from kerotrack.prices.service import PriceService
 from kerotrack.pubsub.bus import PubSubBus
+from kerotrack.quotes.store import best_recent
 from kerotrack.scheduler.jobs import run_job
 from kerotrack.scheduler.service import SchedulerService
 from kerotrack.settings.seeds import migrate_default_values, seed_defaults
@@ -60,9 +64,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     pubsub = PubSubBus()
     feed = MqttFeedRing()
 
+    async def quote_lookup() -> float | None:
+        # Never let a quote-store problem break ingest: fall back to the index.
+        try:
+            row = await best_recent(sf, now=local_now())
+            return row.ppl_effective if row is not None else None
+        except Exception:  # noqa: BLE001
+            logging.getLogger(__name__).exception("quote lookup failed")
+            return None
+
     prices = PriceService(
         settings_service=settings_service,
         cache_path=boot.data_dir / "price_cache.json",
+        quote_lookup=quote_lookup,
     )
 
     mqtt = MqttIngest(
@@ -119,6 +133,7 @@ def create_app() -> FastAPI:
     app.include_router(status_router)
     app.include_router(readings_router)
     app.include_router(analysis_router)
+    app.include_router(buying_router)
     app.include_router(costs_router)
     app.include_router(refills_router)
     app.include_router(hdd_router)

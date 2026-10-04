@@ -20,10 +20,12 @@ from kerotrack.settings.schema import SETTINGS_CATALOGUE, SettingDef
 
 # Keys that have been removed from the catalogue and should be cleaned up
 # from the live DB on the next start (B5: prices.homefuelsdirect_url was
-# renamed to prices.yournrg_url after the upstream domestic page died).
+# renamed to prices.yournrg_url after the upstream domestic page died;
+# yournrg was retired in the buy planner, it does not deliver locally).
 RETIRED_KEYS: frozenset[str] = frozenset(
     {
         "prices.homefuelsdirect_url",
+        "prices.yournrg_url",
     }
 )
 

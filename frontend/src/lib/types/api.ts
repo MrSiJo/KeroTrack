@@ -108,3 +108,77 @@ export type LoginResponse = {
 };
 
 export type SetupStatus = { needs_setup: boolean };
+
+// ----- buying planner ------------------------------------------------
+
+export type BuyingState =
+  | "buy_now"
+  | "deadline"
+  | "overdue"
+  | "no_room"
+  | "wait"
+  | "unknown";
+
+export type BuyingQuote = {
+  id: number;
+  fetched_at: string;
+  supplier: string;
+  kind: string;
+  litres: number | null;
+  delivery_by: string | null;
+  delivery_label: string | null;
+  urgent: number;
+  ppl_net: number | null;
+  total_inc_vat: number | null;
+  fees_inc_vat: number | null;
+  ppl_effective: number | null;
+  ok: number;
+  error: string | null;
+};
+
+export type BuyingScenario = {
+  run_out: string | null;
+  order_by: string | null;
+  next_order_by: string | null;
+  /** Weekly points: [isoDate, litres]. */
+  series: [string, number][];
+};
+
+export type BuyingSummary = {
+  state: BuyingState;
+  updated_at: string | null;
+  trigger_ppl: number | null;
+  headroom_l: number | null;
+  best: {
+    supplier: string;
+    total_inc_vat: number;
+    ppl_effective: number;
+    delivery_label: string | null;
+    fetched_at: string;
+  } | null;
+  quotes: BuyingQuote[];
+  scenarios: Record<string, BuyingScenario>;
+  active_scenario: string | null;
+  k: number | null;
+  hw_l_per_day: number | null;
+  context: {
+    index_percentile_365d: number | null;
+    /** Pence, positive means dearer. */
+    best_change_30d: number | null;
+    spread_today: number | null;
+  };
+};
+
+export type BuyingCalibration = {
+  k: number | null;
+  hw_fixed_l: number | null;
+  free_hw_l: number | null;
+  free_k: number | null;
+  proposed_burner_minutes: number | null;
+  hw_floor_l: number | null;
+  mae_l: number | null;
+  days_used: number;
+  heating_days: number;
+  current_burner_minutes: number | null;
+  current_hw_l_per_day: number | null;
+};

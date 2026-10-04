@@ -19,7 +19,6 @@ def _failed() -> PriceFetchResult:
         ppl=None,
         source=None,
         boilerjuice_ppl=None,
-        yournrg=None,
         used_cache=False,
         fetch_failed=True,
     )
@@ -30,7 +29,6 @@ def _ok(ppl: float) -> PriceFetchResult:
         ppl=ppl,
         source="boilerjuice",
         boilerjuice_ppl=ppl,
-        yournrg=None,
         used_cache=False,
     )
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import time
 from pathlib import Path
+from typing import Awaitable, Callable
 
 import httpx
 
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 # After a scrape where every provider failed, don't re-run the full
-# retry ladder (2 sources × 3 attempts × 1s delays, ~6s inline in the
+# retry ladder (3 attempts × 1s delays, ~6s inline in the
 # ingest path) for this long — serve the last known result instead
 # (KERO-M3). Total failure never writes a cache entry, so without this
 # the stall repeats on every reading until a provider recovers.
@@ -34,7 +35,9 @@ class PriceService:
         *,
         settings_service: SettingsService,
         cache_path: Path,
+        quote_lookup: Callable[[], Awaitable[float | None]] | None = None,
     ) -> None:
+        self._quote_lookup = quote_lookup
         self._svc = settings_service
         self._cache_path = cache_path
         self._client: httpx.AsyncClient | None = None
@@ -61,14 +64,12 @@ class PriceService:
         ttl = int(await self._svc.get("prices.cache_ttl_seconds"))
         cache = PriceCache(self._cache_path, ttl_seconds=ttl)
         bj_url = str(await self._svc.get("prices.boilerjuice_url"))
-        yn_url = str(await self._svc.get("prices.yournrg_url"))
         client = await self._ensure_client()
         try:
             result = await fetch_current_price(
                 client=client,
                 cache=cache,
                 boilerjuice_url=bj_url,
-                yournrg_url=yn_url,
             )
         except Exception:  # noqa: BLE001
             logger.exception("price fetch failed")
@@ -78,7 +79,6 @@ class PriceService:
                 ppl=float(ppl) if ppl is not None else None,
                 source=cached.get("source") if cached else None,
                 boilerjuice_ppl=None,
-                yournrg=None,
                 used_cache=cached is not None,
                 fetch_failed=True,
             )
@@ -87,6 +87,11 @@ class PriceService:
         return result
 
     async def current_ppl(self) -> float | None:
+        """Cheapest recent local quote if any, else the BoilerJuice value."""
+        if self._quote_lookup is not None:
+            quoted = await self._quote_lookup()
+            if quoted is not None:
+                return quoted
         result = await self.refresh()
         return result.ppl
 
