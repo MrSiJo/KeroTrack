@@ -47,6 +47,12 @@ CALIBRATION_WINDOW_DAYS = 400
 HORIZON_DAYS = 365
 NORMAL = "normal"
 _TS_FMT = "%Y-%m-%d %H:%M:%S"
+# Ceiling on a believable daily HDD value. A day derived from tank temperature
+# against base 15.5 C cannot exceed about 35, so anything above this is one of
+# the v1 migration's MONTHLY totals keyed on the 1st of the month (readings had
+# a gap, so the daily roll-up never overwrote them). Those rows are excluded
+# from climatology and calibration rather than read as a single freezing day.
+MAX_DAILY_HDD = 40.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,13 +130,21 @@ async def _manual_refill_days(sf: async_sessionmaker) -> set[date]:
 
 
 async def _hdd_by_day(sf: async_sessionmaker) -> dict[date, float]:
+    """Daily HDD by local day, skipping v1 monthly totals (> ``MAX_DAILY_HDD``).
+
+    Feeds both calibration and climatology, so the filter covers both.
+    """
     async with sf() as session:
         rows = (await session.execute(select(HddDatum))).scalars().all()
     out: dict[date, float] = {}
     for r in rows:
         d = _day_of(r.date)
-        if d is not None:
-            out[d] = float(r.hdd or 0.0)
+        if d is None:
+            continue
+        value = float(r.hdd or 0.0)
+        if value > MAX_DAILY_HDD:
+            continue
+        out[d] = value
     return out
 
 
@@ -257,6 +271,9 @@ async def project(
     lead_days = int(await svc.get("buying.lead_time_days"))
     winter_extra = int(await svc.get("buying.winter_lead_extra_days"))
     min_order = float(await svc.get("buying.min_order_litres"))
+    fill_cap = float(await svc.get("tank.capacity_l")) * float(
+        await svc.get("buying.safe_fill_pct")
+    )
     expected_hdd = climatology(hdd_by_day)
 
     def run(start_day: date, litres: float, multipliers: dict[int, float]):
@@ -285,7 +302,9 @@ async def project(
             levels = dict(result.series)
             # order_by can sit before today when the tank is already low.
             level_then = levels.get(order_by, start_litres)
-            after = run(max(order_by, today), level_then + min_order, multipliers)
+            # An order can't fill past the safe fill level.
+            after_litres = min(level_then + min_order, fill_cap)
+            after = run(max(order_by, today), after_litres, multipliers)
             next_order_by = order_by_date(
                 after.run_out, lead_days=lead_days, winter_extra_days=winter_extra
             )

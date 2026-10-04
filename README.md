@@ -160,7 +160,7 @@ After first-run setup, every other knob lives under **Settings**:
 - **MQTT:** broker, port, username, password, subscribe + publish topics, idle-reconnect window, broadcast interval.
 - **Tank:** capacity, dimensions, thermal coefficient.
 - **Boiler:** model, burner, nozzle, fuel rate, input/output kW, fuel pump pressure, efficiency, flue CO2.
-- **Prices:** YourNRG scrape URL + cron, BoilerJuice URL + cron.
+- **Prices:** BoilerJuice national index URL and cache TTL. Prices now come from supplier quotes polled by the buy planner, with the BoilerJuice national index as the fallback.
 - **Notifications:** Apprise URLs (one per line), notification cron.
 - **Costs:** seasonal HDD source, base/peak rates, etc.
 

@@ -122,6 +122,31 @@ async def _has_fresh_index(sf: async_sessionmaker, now: datetime) -> bool:
     return row.fetched_at >= (now - timedelta(hours=FRESH_HOURS)).strftime(_FMT)
 
 
+def _best_of_poll(rows: list[PriceQuote], now: datetime) -> PriceQuote | None:
+    """Cheapest ok, non urgent quote in the latest poll (spec Part D).
+
+    The poll must be within ``FRESH_HOURS`` of ``now``; an older latest poll
+    gives no best, so the signal falls back to the index or ``unknown``.
+    """
+    cutoff = (now - timedelta(hours=FRESH_HOURS)).strftime(_FMT)
+    candidates = [
+        r
+        for r in rows
+        if r.ok == 1
+        and not r.urgent
+        and r.ppl_effective is not None
+        and r.total_inc_vat is not None
+        and r.fetched_at >= cutoff
+    ]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda r: (r.total_inc_vat, r.id))
+
+
+async def _best_latest(sf: async_sessionmaker, now: datetime) -> PriceQuote | None:
+    return _best_of_poll(await latest_poll(sf), now)
+
+
 def _alert_body(payload: dict[str, Any]) -> str:
     def money(v: float | None) -> str:
         return f"£{v:.2f}" if v is not None else "n/a"
@@ -210,7 +235,7 @@ async def run_buying(
     scenario = NORMAL
     try:
         headroom = await _headroom(sf, svc)
-        best = await best_recent(sf, now=now, max_age_h=FRESH_HOURS)
+        best = await _best_latest(sf, now)
         if bundle is not None:
             scenario = bundle.active_scenario
             outcome = bundle.outcomes.get(scenario) or bundle.outcomes.get(NORMAL)
@@ -254,6 +279,7 @@ async def run_buying(
     try:
         async with sf() as session:
             row = await session.get(BuyingState, STATE_ROW_ID)
+            previous_state = row.state if row is not None else None
             if row is None:
                 row = BuyingState(id=STATE_ROW_ID, state=state, updated_at=now_str)
                 session.add(row)
@@ -286,7 +312,10 @@ async def run_buying(
                         await session.commit()
                 logger.info("buying: alert sent for state %s", state)
             else:
-                logger.warning("buying: alert for state %s not delivered; will retry", state)
+                # Warn once on entering the state; the retries that follow
+                # (e.g. no Apprise URLs configured) log at INFO.
+                log = logger.warning if previous_state != state else logger.info
+                log("buying: alert for state %s not delivered; will retry", state)
     except Exception:  # noqa: BLE001
         logger.exception("buying: state persistence failed")
 
@@ -379,7 +408,8 @@ async def build_summary(sf: async_sessionmaker, svc: SettingsService, *, now: da
     if scenarios and active not in scenarios:
         active = NORMAL
 
-    best = await best_recent(sf, now=now, max_age_h=FRESH_HOURS)
+    quotes = await latest_poll(sf)
+    best = _best_of_poll(quotes, now)
     best_dict = (
         {
             "supplier": best.supplier,
@@ -391,17 +421,19 @@ async def build_summary(sf: async_sessionmaker, svc: SettingsService, *, now: da
         if best is not None
         else None
     )
-    quotes = await latest_poll(sf)
 
+    # The 30 day change compares like with like: the 36 h window best now
+    # against the same window a month ago.
+    recent = await best_recent(sf, now=now, max_age_h=FRESH_HOURS)
     month_ago_at = now - timedelta(days=30)
     month_ago = await best_recent(
         sf, now=month_ago_at, max_age_h=FRESH_HOURS, until=month_ago_at
     )
     best_change = (
-        round(best.ppl_effective - month_ago.ppl_effective, 2)
-        if best is not None
+        round(recent.ppl_effective - month_ago.ppl_effective, 2)
+        if recent is not None
         and month_ago is not None
-        and best.ppl_effective is not None
+        and recent.ppl_effective is not None
         and month_ago.ppl_effective is not None
         else None
     )

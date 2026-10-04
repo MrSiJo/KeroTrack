@@ -296,7 +296,7 @@
           {:else}
             <p>
               Proposed burner minutes:
-              <span class="font-mono text-text">{calibration.proposed_burner_minutes}</span>
+              <span class="font-mono text-text">{fixed(calibration.proposed_burner_minutes, 1)}</span>
               (now {calibration.current_burner_minutes ?? "n/a"}).
             </p>
           {/if}

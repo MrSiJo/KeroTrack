@@ -150,3 +150,16 @@ def test_run_returns_summary(app_client) -> None:
     resp = c.post("/api/buying/run")
     assert resp.status_code == 200
     assert resp.json() == {"state": "buy"}
+
+
+def test_run_without_scheduler_503(app_client) -> None:
+    c, app = app_client
+    _login(c)
+    saved = app.state.scheduler
+    app.state.scheduler = None
+    try:
+        resp = c.post("/api/buying/run")
+    finally:
+        app.state.scheduler = saved
+    assert resp.status_code == 503
+    assert resp.json()["detail"] == "scheduler_not_running"

@@ -28,3 +28,15 @@ def test_validate_rejects_bad_day_and_hours():
 
 def test_empty_schedule_is_zero():
     assert hw_litres_per_day_avg([], 33.0, 2.33) == 0.0
+
+@pytest.mark.parametrize("hours", [True, False, float("nan"), float("inf"), float("-inf")])
+def test_validate_rejects_bool_and_non_finite_hours(hours):
+    with pytest.raises(ValueError):
+        validate_schedule([{"days": ["mon"], "start": "03:00", "hours": hours}])
+
+def test_validate_rejects_duplicate_days_in_a_slot():
+    with pytest.raises(ValueError):
+        validate_schedule([{"days": ["mon", "mon"], "start": "03:00", "hours": 1.0}])
+
+def test_validate_allows_same_day_across_slots():
+    assert len(validate_schedule(DEFAULT)) == 2

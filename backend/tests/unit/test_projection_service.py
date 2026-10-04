@@ -16,6 +16,8 @@ from kerotrack.models.reading import Reading
 from kerotrack.models.runway_projection import RunwayProjection
 from kerotrack.projection.service import (
     DEFAULT_K,
+    MAX_DAILY_HDD,
+    _hdd_by_day,
     load_hw,
     persist_projection,
     project,
@@ -171,3 +173,50 @@ async def test_malformed_scenarios_fall_back_to_normal(
 
     assert bundle is not None
     assert set(bundle.outcomes) == {"normal"}
+
+
+async def test_v1_monthly_hdd_lumps_are_ignored(sf: async_sessionmaker, seeded_settings) -> None:
+    """A v1 monthly total keyed on the 1st (e.g. 322) is not a daily value."""
+    now = datetime(2026, 8, 31, 18, 0)
+    await _seed_summer(sf, now)
+    baseline = await project(sf, seeded_settings, now=now)
+    assert baseline is not None
+
+    async with sf() as session:
+        session.add(HddDatum(date="2024-01-01", hdd=322.0))
+        session.add(HddDatum(date="2024-01-02", hdd=12.5))
+        await session.commit()
+
+    by_day = await _hdd_by_day(sf)
+    assert date(2024, 1, 1) not in by_day
+    assert by_day[date(2024, 1, 2)] == pytest.approx(12.5)
+    assert all(v <= MAX_DAILY_HDD for v in by_day.values())
+
+    # Drop the normal January row too: with only the lump left, January's
+    # climatology must stay at zero, so the run out date does not move.
+    async with sf() as session:
+        row = (
+            await session.execute(select(HddDatum).where(HddDatum.date == "2024-01-02"))
+        ).scalar_one()
+        await session.delete(row)
+        await session.commit()
+    bundle = await project(sf, seeded_settings, now=now)
+    assert bundle is not None
+    assert bundle.outcomes["normal"].run_out == baseline.outcomes["normal"].run_out
+
+
+async def test_after_order_level_is_capped_at_safe_fill(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    """An order can't fill past capacity * safe_fill_pct (600 * 0.95 = 570 L)."""
+    now = datetime(2026, 8, 31, 18, 0)
+    await _seed_summer(sf, now)
+    await seeded_settings.set("tank.capacity_l", 600.0)
+    nexts = []
+    for min_order in (500, 550):
+        await seeded_settings.set("buying.min_order_litres", min_order)
+        bundle = await project(sf, seeded_settings, now=now)
+        assert bundle is not None
+        nexts.append(bundle.outcomes["normal"].next_order_by)
+    # Both orders overflow the cap, so both refill to the same level.
+    assert nexts[0] is not None and nexts[0] == nexts[1]

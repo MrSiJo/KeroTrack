@@ -7,6 +7,7 @@ The schedule says when the boiler heats water; the burner fires for
 
 from __future__ import annotations
 
+import math
 import re
 
 WEEKDAYS: tuple[str, ...] = ("mon", "tue", "wed", "thu", "fri", "sat", "sun")
@@ -23,11 +24,19 @@ def validate_schedule(raw: object) -> list[dict]:
         days = slot.get("days")
         if not isinstance(days, list) or not days or any(d not in WEEKDAYS for d in days):
             raise ValueError(f"bad days in slot {slot!r}")
+        if len(set(days)) != len(days):
+            raise ValueError(f"duplicate days in slot {slot!r}")
         start = str(slot.get("start", "00:00"))
         if not _HHMM.match(start):
             raise ValueError(f"bad start time {start!r}")
         hours = slot.get("hours", 1.0)
-        if not isinstance(hours, (int, float)) or hours <= 0 or hours > 24:
+        if (
+            isinstance(hours, bool)
+            or not isinstance(hours, (int, float))
+            or not math.isfinite(hours)
+            or hours <= 0
+            or hours > 24
+        ):
             raise ValueError(f"bad hours {hours!r}")
         out.append({"days": list(days), "start": start, "hours": float(hours)})
     return out

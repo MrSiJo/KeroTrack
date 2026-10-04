@@ -29,8 +29,9 @@ This is the v1 algorithm restored (backlog A1):
    the 365 day horizon reports 700 days and no date. The legacy fallback
    is the flat rate capped at 400 (HDD>0) or 700 (HDD=0).
 
-Output shape is unchanged — every key in spec §3.2 still present, same
-types, same rounding.
+Output shape: every key in spec §3.2 is still present with the same types
+and rounding, plus one added key, ``heating_estimate_basis`` (``"model"`` or
+``"legacy"``, see point 4).
 """
 
 from __future__ import annotations

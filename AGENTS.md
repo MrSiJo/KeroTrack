@@ -66,9 +66,14 @@ change, not the contract.
   allowlist where feasible. Don't proxy arbitrary URLs through the backend.
 
 ### Database access
-- All ORM access is parameter-bound. The one f-string SQL in
-  `migration/v1_to_v2.py` is a CLI-only path against a hardcoded table set
-  and is annotated `# nosec B608  # noqa: S608`. Don't add others.
+- All ORM access is parameter-bound. The only f-string SQL is:
+  - `migration/v1_to_v2.py`: a CLI-only path against a hardcoded table set.
+  - `db_migrate.ensure_columns`: two statements (`PRAGMA table_info` and
+    `ALTER TABLE ... ADD COLUMN`) built from code-defined names only; the
+    table and column names must pass `str.isidentifier()` and the column
+    type must be in `_ALLOWED_TYPES`, else it raises `ValueError`.
+
+  Each is annotated `# nosec B608  # noqa: S608`. Don't add others.
 
 ## Pre-commit
 

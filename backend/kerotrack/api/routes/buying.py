@@ -6,7 +6,7 @@ import dataclasses
 from datetime import timedelta
 from typing import Any
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 
 from kerotrack.analysis.hot_water import hw_litres_per_day_avg
 from kerotrack.buying.service import build_summary
@@ -47,7 +47,10 @@ async def quotes(
 @router.post("/run")
 async def run(request: Request) -> Any:
     """Run the buying job now and return its summary. Writes no settings."""
-    return await request.app.state.scheduler.trigger_now("buying")
+    scheduler = getattr(request.app.state, "scheduler", None)
+    if scheduler is None:
+        raise HTTPException(status_code=503, detail="scheduler_not_running")
+    return await scheduler.trigger_now("buying")
 
 
 @router.post("/calibrate")

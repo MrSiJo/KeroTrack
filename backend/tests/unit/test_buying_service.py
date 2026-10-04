@@ -428,3 +428,79 @@ async def test_trigger_read_failure_publishes_none(
     pub = FakePublisher()
     await run_buying(sf=sf, settings_service=seeded_settings, publisher=pub, now=NOW)
     assert pub.payloads[0]["trigger_ppl"] is None
+
+
+async def test_best_comes_from_the_latest_poll_not_the_36h_window(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    """07:00 was cheap, 13:00 is dearer: the 13:00 price is the best now."""
+    await _seed_readings(sf, NOW)
+    await _configure(seeded_settings, postcode="")
+    morning = NOW.replace(hour=7)
+    afternoon = NOW.replace(hour=13)
+    await _add(sf, _quote(morning, 110.0), _quote(afternoon, 125.0))
+    sent: list[dict[str, Any]] = []
+    pub = FakePublisher()
+
+    summary = await run_buying(
+        sf=sf,
+        settings_service=seeded_settings,
+        publisher=pub,
+        now=NOW,
+        apprise_factory=_factory(sent),
+    )
+
+    assert summary["best"]["ppl_effective"] == pytest.approx(125.0)
+    assert summary["best"]["fetched_at"] == afternoon.strftime("%Y-%m-%d %H:%M:%S")
+    assert pub.payloads[0]["best_ppl_effective"] == pytest.approx(125.0)
+    assert pub.payloads[0]["fetched_at"] == afternoon.strftime("%Y-%m-%d %H:%M:%S")
+    assert summary["state"] != "buy_now"
+    assert sent == []
+
+
+async def test_latest_poll_older_than_36h_gives_no_best(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    await _add(sf, _quote(NOW - timedelta(hours=40), 105.0))
+    summary = await build_summary(sf, seeded_settings, now=NOW)
+    assert summary["best"] is None
+
+
+async def test_latest_poll_best_skips_urgent_and_failed_rows(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    urgent = _quote(NOW, 90.0)
+    urgent.urgent = 1
+    failed = _quote(NOW, 80.0)
+    failed.ok = 0
+    await _add(sf, urgent, failed, _quote(NOW, 105.0), _quote(NOW, 107.0))
+    summary = await build_summary(sf, seeded_settings, now=NOW)
+    assert summary["best"]["ppl_effective"] == pytest.approx(105.0)
+
+
+async def test_undelivered_alert_warns_only_on_entering_the_state(
+    sf: async_sessionmaker, seeded_settings, caplog
+) -> None:
+    import logging
+
+    await _seed_readings(sf, NOW)
+    await _configure(seeded_settings, postcode="")
+    await seeded_settings.set("notifications.apprise_urls", [])
+    await _add(sf, _quote(NOW, 105.0))
+    caplog.set_level(logging.INFO, logger="kerotrack.buying.service")
+
+    def undelivered(level: int) -> list[logging.LogRecord]:
+        return [
+            r
+            for r in caplog.records
+            if r.name == "kerotrack.buying.service"
+            and "not delivered" in r.getMessage()
+            and r.levelno == level
+        ]
+
+    assert (await _run(sf, seeded_settings, NOW, []))["state"] == "buy_now"
+    assert len(undelivered(logging.WARNING)) == 1
+    caplog.clear()
+    await _run(sf, seeded_settings, NOW + timedelta(hours=1), [])
+    assert undelivered(logging.WARNING) == []
+    assert len(undelivered(logging.INFO)) == 1

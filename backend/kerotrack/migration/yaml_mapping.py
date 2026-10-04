@@ -61,8 +61,9 @@ KEY_MAP: list[tuple[str, str | None]] = [
     ("mqtt.timeout_minutes", "mqtt.timeout_minutes"),
     ("mqtt.broadcast_interval_minutes", "mqtt.broadcast_interval_minutes"),
     ("notifications.apprise_urls", "notifications.apprise_urls"),
-    # v1's oil_prices.url pointed at HomeFuelsDirect, which has since gone
-    # offline. v2 ships a YourNRG default; the v1 URL is ignored at migration.
+    # v1's oil_prices.url pointed at HomeFuelsDirect's old domestic page,
+    # which has since gone. v2 polls supplier quotes through the buy planner
+    # (with the BoilerJuice index as fallback), so the v1 URL is ignored.
     ("oil_prices.url", None),
     ("alerts.low_level_threshold", "alerts.low_level_threshold_pct"),
     ("currency.symbol", "currency.symbol"),
