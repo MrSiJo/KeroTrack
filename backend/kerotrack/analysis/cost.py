@@ -44,6 +44,24 @@ REFILL_MATCH_TOLERANCE_SECONDS = 24 * 3600
 MIN_CONSUMPTION_PER_DAY_FALLBACK = 0.1
 DEFAULT_EFFICIENCY = 0.85
 
+# Period boundary rules (spec A7).
+# A logged refill date is searched for the real level jump in
+# [refill_date - LOOKBACK, refill_date + LOOKAHEAD]: owners often log the
+# invoice date, days after the delivery. With no jump, the first trusted
+# reading at/after the log date is used only if it is within LOOKAHEAD.
+MANUAL_JUMP_LOOKBACK = timedelta(days=14)
+MANUAL_JUMP_LOOKAHEAD = timedelta(days=3)
+# A sensor refill flag this close to a logged refill defers to the log.
+SENSOR_FLAG_MANUAL_EXCLUSION = timedelta(days=7)
+# A sensor refill flag must hold its level for this long afterwards.
+SENSOR_FLAG_CONFIRM_WINDOW = timedelta(hours=24)
+# Boundaries this close together collapse onto the earlier one.
+BOUNDARY_DEDUPE_WINDOW = timedelta(days=1)
+# Mirrors the `detection.refill_threshold_l` seed default; used only when a
+# caller doesn't pass the configured value.
+DEFAULT_REFILL_THRESHOLD_L = 100.0
+_TS_FMT = "%Y-%m-%d %H:%M:%S"
+
 
 def _days_in_month_for(year: int) -> float:
     """Calendar-aware days-in-month (366/12 in leap years)."""
@@ -78,6 +96,224 @@ async def _all_refill_readings(sf: async_sessionmaker) -> list[Reading]:
             .scalars()
             .all()
         )
+
+
+async def _first_trusted_reading_at_or_after(
+    sf: async_sessionmaker, date_str: str
+) -> Reading | None:
+    """First non-noise reading at or after ``date_str``: the post-refill
+    level a logged refill date anchors to (same query as consumption's
+    baseline lookup)."""
+    async with sf() as session:
+        return (
+            await session.execute(
+                select(Reading)
+                .where(Reading.date >= date_str, trusted_readings_clause())
+                .order_by(asc(Reading.date))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+
+async def _manual_refill_boundary(
+    sf: async_sessionmaker, refill_date: str, refill_threshold_l: float
+) -> str | None:
+    """Boundary timestamp for one logged refill, or None to skip it.
+
+    1. Scan readings in [refill_date - 14 d, refill_date + 3 d], noise
+       suppressed rows INCLUDED (a real refill that lands in one interval is
+       often noise suppressed), for the first reading that rises more than
+       ``refill_threshold_l`` over the last TRUSTED level before it (which
+       may sit just before the window) AND whose first trusted reading
+       at/after it is still at least ``refill_threshold_l`` above that
+       trusted level. Reverting upward spikes and phantom downward dips both
+       fail this; scanning continues. The boundary is that first trusted
+       reading.
+    2. No jump: the first trusted reading at/after ``refill_date``, but only
+       when it is within 3 days of it. Log entries that predate the readings
+       (or sit in a gap) are skipped rather than collapsing onto whatever
+       reading comes next.
+    """
+    refill_dt = parse_local(refill_date)
+    if refill_dt is None:
+        return None
+    window_start = (refill_dt - MANUAL_JUMP_LOOKBACK).strftime(_TS_FMT)
+    window_end_dt = refill_dt + MANUAL_JUMP_LOOKAHEAD
+    window_end = window_end_dt.strftime(_TS_FMT)
+    async with sf() as session:
+        previous_trusted = (
+            await session.execute(
+                select(Reading.litres_remaining)
+                .where(
+                    Reading.date < window_start,
+                    Reading.litres_remaining.isnot(None),
+                    trusted_readings_clause(),
+                )
+                .order_by(desc(Reading.date))
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        # Every reading in the window (noise rows included: a real refill
+        # that lands in one interval is often noise suppressed), tagged with
+        # whether it is trusted, via the single shared clause.
+        window = (
+            await session.execute(
+                select(Reading, trusted_readings_clause().label("trusted"))
+                .where(
+                    Reading.date >= window_start,
+                    Reading.date <= window_end,
+                    Reading.litres_remaining.isnot(None),
+                )
+                .order_by(asc(Reading.date))
+            )
+        ).all()
+    if not window:
+        return None
+
+    # Rises are measured against the last TRUSTED level, never a noise row:
+    # a phantom downward dip followed by a normal trusted reading must not
+    # look like a refill. The confirming trusted reading at/after the
+    # candidate must also sit at least the threshold above that level, so a
+    # reverting upward spike fails too. Failed candidates keep the scan going.
+    last_trusted = float(previous_trusted) if previous_trusted is not None else None
+    for reading, trusted in window:
+        litres = float(reading.litres_remaining)
+        if last_trusted is not None and litres - last_trusted > refill_threshold_l:
+            post_jump = await _first_trusted_reading_at_or_after(sf, reading.date)
+            if (
+                post_jump is not None
+                and post_jump.litres_remaining is not None
+                and float(post_jump.litres_remaining)
+                >= last_trusted + refill_threshold_l
+            ):
+                return post_jump.date
+        if trusted:
+            last_trusted = litres
+
+    baseline = await _first_trusted_reading_at_or_after(sf, refill_date)
+    if baseline is None:
+        return None
+    baseline_dt = parse_local(baseline.date)
+    if baseline_dt is None or baseline_dt > window_end_dt:
+        return None
+    return baseline.date
+
+
+async def _trusted_reading_at(sf: async_sessionmaker, date_str: str) -> Reading | None:
+    """The trusted reading stamped exactly ``date_str`` (a boundary)."""
+    async with sf() as session:
+        return (
+            await session.execute(
+                select(Reading)
+                .where(Reading.date == date_str, trusted_readings_clause())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+
+
+async def _sensor_flag_holds(
+    sf: async_sessionmaker, flagged: Reading, refill_threshold_l: float
+) -> bool:
+    """True when the level stays up for 24 h after a sensor refill flag.
+
+    Needs at least one trusted reading in the window: a flag on the newest
+    reading can't be shown to hold yet, so it waits for the next run (which
+    rebuilds the table anyway). Every trusted reading in the window must be
+    no more than ``refill_threshold_l`` below the flagged level; flapping
+    falls straight back and fails this.
+    """
+    flagged_dt = parse_local(flagged.date)
+    if flagged_dt is None or flagged.litres_remaining is None:
+        return False
+    window_end = (flagged_dt + SENSOR_FLAG_CONFIRM_WINDOW).strftime(_TS_FMT)
+    async with sf() as session:
+        following = (
+            (
+                await session.execute(
+                    select(Reading.litres_remaining).where(
+                        Reading.date > flagged.date,
+                        Reading.date <= window_end,
+                        Reading.litres_remaining.isnot(None),
+                        trusted_readings_clause(),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+    if not following:
+        return False
+    floor = float(flagged.litres_remaining) - refill_threshold_l
+    return all(float(litres) >= floor for litres in following)
+
+
+async def _period_boundaries(
+    sf: async_sessionmaker,
+    refill_threshold_l: float = DEFAULT_REFILL_THRESHOLD_L,
+) -> list[str]:
+    """Sorted cost period boundary timestamps (spec A7).
+
+    1. Every ``actual_refill_costs.refill_date`` (the operator's log is
+       authoritative) maps to a post-refill reading via
+       ``_manual_refill_boundary``: the first trusted reading after the real
+       level jump near the log date, else the first trusted reading within
+       3 days after it. Neither: skipped.
+    2. A sensor ``refill_detected == "y"`` reading counts only when no
+       logged refill is within 7 days of it, the reading itself is trusted,
+       and the level holds for the next 24 h (see ``_sensor_flag_holds``).
+       Real refills that were noise suppressed never set the flag, and
+       flapping sets it falsely; the log covers both.
+    3. Boundaries within 1 day of each other collapse onto the earlier.
+    """
+    actuals = await _all_actual_costs(sf)
+    manual_dts: list[datetime] = []
+    candidates: set[str] = set()
+    for actual in actuals:
+        manual_dt = parse_local(actual.refill_date)
+        if manual_dt is None:
+            continue
+        manual_dts.append(manual_dt)
+        boundary = await _manual_refill_boundary(
+            sf, actual.refill_date, refill_threshold_l
+        )
+        if boundary is not None:
+            candidates.add(boundary)
+
+    async with sf() as session:
+        flagged = (
+            (
+                await session.execute(
+                    select(Reading)
+                    .where(Reading.refill_detected == "y", trusted_readings_clause())
+                    .order_by(asc(Reading.date))
+                )
+            )
+            .scalars()
+            .all()
+        )
+    for reading in flagged:
+        flag_dt = parse_local(reading.date)
+        if flag_dt is None:
+            continue
+        if any(
+            abs(flag_dt - manual_dt) <= SENSOR_FLAG_MANUAL_EXCLUSION
+            for manual_dt in manual_dts
+        ):
+            continue
+        if await _sensor_flag_holds(sf, reading, refill_threshold_l):
+            candidates.add(reading.date)
+
+    boundaries: list[str] = []
+    last_dt: datetime | None = None
+    for date_str in sorted(candidates):
+        dt = parse_local(date_str)
+        if dt is None:
+            continue
+        if last_dt is not None and dt - last_dt <= BOUNDARY_DEDUPE_WINDOW:
+            continue
+        boundaries.append(date_str)
+        last_dt = dt
+    return boundaries
 
 
 async def _readings_between(
@@ -260,23 +496,30 @@ def _per_pair_cost(
 async def _detect_periods(
     sf: async_sessionmaker, svc: SettingsService
 ) -> int:
-    """Find refill events, pair into periods, walk readings, upsert rows.
+    """Pair period boundaries into periods, walk readings, upsert rows,
+    then delete ``refill_periods`` rows that no longer match a boundary pair.
 
+    Boundaries come from the refill log first (``_period_boundaries``).
     Returns the number of period rows newly inserted or refreshed.
     """
     refill_threshold_l = float(await svc.get("detection.refill_threshold_l"))
-    refills = await _all_refill_readings(sf)
-    if len(refills) < 2:
+    boundaries = await _period_boundaries(sf, refill_threshold_l)
+    if len(boundaries) < 2:
+        # No pairs computed: leave the table alone rather than wipe it.
         return 0
     actuals = await _all_actual_costs(sf)
 
     written = 0
-    for current, nxt in zip(refills, refills[1:]):
-        start_date = current.date
-        end_date = nxt.date
+    computed_pairs: set[tuple[str, str]] = set()
+    for start_date, end_date in zip(boundaries, boundaries[1:]):
+        computed_pairs.add((start_date, end_date))
         start_dt = parse_local(start_date)
         end_dt = parse_local(end_date)
         if start_dt is None or end_dt is None:
+            continue
+        current = await _trusted_reading_at(sf, start_date)
+        nxt = await _trusted_reading_at(sf, end_date)
+        if current is None or nxt is None:
             continue
         days = max((end_dt - start_dt).days, 1)
 
@@ -394,6 +637,24 @@ async def _detect_periods(
                 end_date,
             )
 
+    # Rows from earlier boundary sets (e.g. a sensor-only false refill) no
+    # longer match any pair: delete them so the table is rebuilt each run.
+    # Only once at least one period was actually written, so a run that
+    # could value nothing never empties the table.
+    if written == 0:
+        return 0
+    async with sf() as session:
+        stale = [
+            row
+            for row in (await session.execute(select(RefillPeriod))).scalars().all()
+            if (row.start_date, row.end_date) not in computed_pairs
+        ]
+        for row in stale:
+            await session.delete(row)
+        await session.commit()
+    if stale:
+        logger.info("Deleted %d stale refill period(s)", len(stale))
+
     return written
 
 
@@ -429,21 +690,39 @@ async def compute(
                 select(RefillPeriod).order_by(desc(RefillPeriod.end_date))
             )
         ).scalars().all()
-        actuals_by_invoice = {
-            row.invoice_ref or row.refill_date: row
-            for row in (
-                await session.execute(select(ActualRefillCost))
-            ).scalars().all()
-        }
+        refill_log_dates = (
+            await session.execute(select(ActualRefillCost.refill_date))
+        ).scalars().all()
 
     if not periods:
         return None
 
     latest = periods[0]
-    days_since_refill = 0
-    end_dt = parse_local(latest.end_date)
-    if end_dt is not None:
-        days_since_refill = max((local_now() - end_dt).days, 0)
+    now = local_now()
+
+    def _whole_days_since(when: datetime | None) -> int | None:
+        if when is None:
+            return None
+        return int(max((now - when).total_seconds() / 86400.0, 0.0))
+
+    # A8: days_since_period_end is the old meaning (from the latest period's
+    # end); days_since_refill now matches oiltank/analysis: days from the
+    # last logged refill date, else the latest accepted period boundary.
+    days_since_period_end = _whole_days_since(parse_local(latest.end_date))
+    manual_dts = [
+        dt
+        for dt in (parse_local(date_str) for date_str in refill_log_dates)
+        if dt is not None
+    ]
+    if manual_dts:
+        refill_dt: datetime | None = max(manual_dts)
+    else:
+        refill_threshold_l = float(await svc.get("detection.refill_threshold_l"))
+        boundaries = await _period_boundaries(sf, refill_threshold_l)
+        refill_dt = parse_local(boundaries[-1] if boundaries else latest.end_date)
+    days_since_refill = _whole_days_since(refill_dt)
+    if days_since_refill is None:
+        days_since_refill = days_since_period_end or 0
 
     # Weighted-by-days historical averages (A5).
     period_days_pairs = [(p.total_cost or 0.0, p.days or 0) for p in periods]
@@ -471,9 +750,6 @@ async def compute(
     # kWh metrics derived from settings + weighted averages.
     kwh_per_l = float(await svc.get("analysis.kwh_per_liter"))
     avg_total_energy_per_period_kwh = avg_period_consumption * kwh_per_l
-    avg_delivered_energy_per_period_kwh = (
-        avg_total_energy_per_period_kwh * energy_efficiency
-    )
     avg_cost_per_kwh = (
         avg_period_cost / avg_total_energy_per_period_kwh
         if avg_total_energy_per_period_kwh > 0
@@ -502,6 +778,7 @@ async def compute(
         "latest_weekly_cost": latest.weekly_cost or 0.0,
         "latest_monthly_cost": latest.monthly_cost or 0.0,
         "days_since_refill": days_since_refill,
+        "days_since_period_end": days_since_period_end,
         "avg_period_cost": round(avg_period_cost, 2),
         "avg_period_consumption": round(avg_period_consumption, 1),
         "avg_daily_cost": round(avg_daily_cost, 2),

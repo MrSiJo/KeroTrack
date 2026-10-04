@@ -22,7 +22,6 @@ from kerotrack.models.reading import Reading
 from kerotrack.models.refill import ActualRefillCost
 from kerotrack.models.refill_period import RefillPeriod
 from kerotrack.publish.mqtt_publisher import MqttPublisher
-from kerotrack.pubsub.bus import PubSubBus
 
 
 pytestmark = pytest.mark.asyncio
@@ -42,6 +41,7 @@ REQUIRED_KEYS = {
     "latest_weekly_cost",
     "latest_monthly_cost",
     "days_since_refill",
+    "days_since_period_end",
     "avg_period_cost",
     "avg_period_consumption",
     "avg_daily_cost",
@@ -58,6 +58,26 @@ REQUIRED_KEYS = {
     "energy_efficiency",
     "analysis_data",
 }
+
+
+def _add_confirming_reading(session, *, seasonal_efficiency: float | None = None) -> None:
+    """A trusted reading 12 h after the 2025-11-01 sensor refill.
+
+    Spec A7: a sensor refill flag with no logged refill nearby is a period
+    boundary only if the level holds for the following 24 h, which needs
+    at least one reading in that window.
+    """
+    session.add(
+        Reading(
+            date="2025-11-01 21:00:00",
+            id="probe",
+            litres_remaining=1195.0,
+            current_ppl=85.0,
+            seasonal_efficiency=seasonal_efficiency,
+            refill_detected="n",
+            leak_detected="n",
+        )
+    )
 
 
 async def _seed_periods(sf: async_sessionmaker) -> None:
@@ -180,6 +200,7 @@ async def test_detect_periods_writes_rows_from_sensor_refills(
                 leak_detected="n",
             )
         )
+        _add_confirming_reading(session)
         await session.commit()
 
     written = await _detect_periods(sf, seeded_settings)
@@ -239,6 +260,7 @@ async def test_detect_periods_idempotent(
                 leak_detected="n",
             )
         )
+        _add_confirming_reading(session)
         await session.commit()
 
     first = await _detect_periods(sf, seeded_settings)
@@ -293,7 +315,10 @@ async def test_detect_periods_prefers_actual_refill_costs(
         # Actual invoice for the 2025-11-01 refill.
         session.add(
             ActualRefillCost(
-                refill_date="2025-11-01 10:30:00",  # within 24h
+                # Logged 30 min before the sensor reading: the log date
+                # maps to the 09:00 reading (first trusted at/after it)
+                # and still exercises the non-exact 24h match.
+                refill_date="2025-11-01 08:30:00",  # within 24h
                 actual_volume_litres=420.0,
                 actual_ppl=82.5,
                 total_cost=346.50,
@@ -355,6 +380,7 @@ async def test_detect_periods_populates_hdd_metrics(
                 leak_detected="n",
             )
         )
+        _add_confirming_reading(session)
         await session.commit()
 
     await _detect_periods(sf, seeded_settings)
@@ -408,6 +434,7 @@ async def test_compute_uses_measured_efficiency_when_available(
                 leak_detected="n",
             )
         )
+        _add_confirming_reading(session, seasonal_efficiency=88.0)
         await session.commit()
 
     await _detect_periods(sf, seeded_settings)
@@ -454,6 +481,7 @@ async def test_run_cost_analysis_writes_periods_via_detect(
                 leak_detected="n",
             )
         )
+        _add_confirming_reading(session)
         await session.commit()
 
     class Recorder:

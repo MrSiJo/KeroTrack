@@ -84,10 +84,22 @@ export type AnalysisResult = {
   remaining_date_empty_hdd: string | null;
 };
 
+/** `oiltank/cost_analysis` payload. Only the keys the UI relies on are
+ * typed; the rest stay open. */
+export type CostAnalysisResult = {
+  /** Days since the last logged refill date (else the latest period
+   * boundary); same meaning as AnalysisResult.days_since_refill. */
+  days_since_refill: number | null;
+  /** Days since the latest refill period ended (the old meaning of
+   * days_since_refill on this payload). */
+  days_since_period_end: number | null;
+  [key: string]: unknown;
+};
+
 export type StatusPayload = {
   reading: Reading | null;
   analysis: AnalysisResult | null;
-  cost: Record<string, unknown> | null;
+  cost: CostAnalysisResult | null;
 };
 
 export type LoginResponse = {
