@@ -17,15 +17,15 @@ Update after every wave. If a session dies, resume from the first unchecked task
 | Task | Status | Commit |
 |---|---|---|
 | Spec | done | 02aa79a |
-| Plan | done | (this commit) |
-| W1 T1 logging | todo | |
-| W1 T3 ensure_columns | todo | |
-| W1 T4 settings catalogue | todo | |
-| W1 T5 hot_water | todo | |
-| W1 T6 daily_usage + calibrate | todo | |
-| W1 T7 runway | todo | |
-| W1 T8 quotes package | todo | |
-| W1 T9 signal | todo | |
+| Plan | done | c214fce |
+| W1 T1 logging | done | 0914ac7 |
+| W1 T3 ensure_columns | done | 3607a8a |
+| W1 T4 settings catalogue | done | d04d547 |
+| W1 T5 hot_water | done | fdd9408 |
+| W1 T6 daily_usage + calibrate | done | faa78aa |
+| W1 T7 runway | done | 6ba0034 |
+| W1 T8 quotes package | done | 3474883 |
+| W1 T9 signal | done | 3c56778 |
 | W2 T2 notifier fix + send | todo | |
 | W2 T10 cost periods + days_since | todo | |
 | W2 T11 projection service + consumption | todo | |
@@ -39,6 +39,7 @@ Update after every wave. If a session dies, resume from the first unchecked task
 
 Notes log (append, newest last):
 - 2026-10-04: baseline backend 336 passed. gitleaks is blocked on Windows by App Control; commit from WSL (`scratchpad/wslcommit.sh`, hooks via `core.hooksPath=~/kt-hooks`). Never `--no-verify`.
+- 2026-10-04 late: Wave 1 complete, all 8 reviewed and approved, suite 392 passed. Next: Wave 2 (T2, T10, T11) in parallel.
 
 ## Global Constraints
 
