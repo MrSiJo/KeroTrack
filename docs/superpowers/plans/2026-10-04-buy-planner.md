@@ -29,18 +29,20 @@ Update after every wave. If a session dies, resume from the first unchecked task
 | W2 T2 notifier fix + send | done | e08a056 |
 | W2 T10 cost periods + days_since | done | 69c483e |
 | W2 T11 projection service + consumption | done | f169bfc |
-| W3 T12 quotes store + price service + yournrg retired | todo | |
-| W4 T13 buying job + MQTT + alerts | todo | |
-| W5 T14 buying API | todo | |
-| W6 T15 frontend | todo | |
-| Final review | todo | |
-| Local DB rehearsal | todo | |
+| W3 T12 quotes store + price service + yournrg retired | done | 9c2f164 |
+| W4 T13 buying job + MQTT + alerts | done | 9c2f164 |
+| W5 T14 buying API | done | 9c2f164 |
+| W6 T15 frontend | done | 9c2f164 |
+| Final review | done | 537ee11 (fix wave) |
+| Local DB rehearsal | done | prod copy + live HFD quote |
 | Deploy (backup first) | todo | |
 
 Notes log (append, newest last):
 - 2026-10-04: baseline backend 336 passed. gitleaks is blocked on Windows by App Control; commit from WSL (`scratchpad/wslcommit.sh`, hooks via `core.hooksPath=~/kt-hooks`). Never `--no-verify`.
 - 2026-10-04 late: Wave 1 complete, all 8 reviewed and approved, suite 392 passed. Next: Wave 2 (T2, T10, T11) in parallel.
 - 2026-10-05 early: Wave 2 complete (T10 took 3 fix rounds: refill log dates lag the real jump by ~12 days, so boundaries snap to the confirmed jump). Suite 425 passed. Next: T12.
+- 2026-10-05 ~00:00: all tasks done. Extra T16 (calibration monthly fit + keep first partial cost period) commit 5fc4cc2. Browser check on synthetic DB passed. Final opus review running. Then: push, CI, deploy with backup.
+- 2026-10-05 ~00:15: final opus review found 2 Critical (v1 monthly HDD lumps; httpx logging postcode) + 2 Important, all fixed and re-reviewed. Suite 478 passed. Next: push, CI build, deploy with backup.
 
 ## Global Constraints
 
