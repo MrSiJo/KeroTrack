@@ -10,18 +10,17 @@ predicate, and includes the monthly block.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-import apprise
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kerotrack.models.analysis_result import AnalysisResult
 from kerotrack.models.reading import Reading, trusted_readings_clause
+from kerotrack.notifier.send import build_apprise, send
 from kerotrack.settings.service import SettingsService
 
 logger = logging.getLogger(__name__)
@@ -417,15 +416,7 @@ def _build_body(
 # --------------------------------------------------------------- main entry
 
 
-def _build_apprise(urls: list[str]) -> apprise.Apprise:
-    instance = apprise.Apprise()
-    for url in urls:
-        if url.startswith("gotify://") and "format=markdown" not in url:
-            sep = "&" if "?" in url else "?"
-            instance.add(f"{url}{sep}format=markdown")
-        else:
-            instance.add(url)
-    return instance
+_build_apprise = build_apprise
 
 
 async def run(
@@ -483,20 +474,7 @@ async def run(
     if test_mode:
         title = f"[TEST] {title}"
 
-    instance = (
-        apprise_factory(urls) if apprise_factory else _build_apprise(urls)
-    )
-    # apprise.notify() is synchronous network I/O — a slow Gotify/SMTP
-    # target would otherwise stall the whole event loop (SSE, MQTT ingest)
-    # for the duration, so run it in a worker thread (KERO-M1).
-    ok = bool(
-        await asyncio.to_thread(
-            instance.notify,
-            body=body,
-            title=title,
-            body_format=apprise.NotifyFormat.MARKDOWN,
-        )
-    )
+    ok = await send(urls, title, body, apprise_factory=apprise_factory)
     return NotifierResult(
         sent=ok,
         channels=len(urls),

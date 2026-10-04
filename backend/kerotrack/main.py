@@ -42,7 +42,7 @@ from kerotrack.prices.service import PriceService
 from kerotrack.pubsub.bus import PubSubBus
 from kerotrack.scheduler.jobs import run_job
 from kerotrack.scheduler.service import SchedulerService
-from kerotrack.settings.seeds import seed_defaults
+from kerotrack.settings.seeds import migrate_default_values, seed_defaults
 from kerotrack.settings.service import SettingsService
 
 
@@ -55,6 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     sf = session_factory(engine)
     async with sf() as session:
         await seed_defaults(session)
+        await migrate_default_values(session)
     settings_service = SettingsService(sf)
     pubsub = PubSubBus()
     feed = MqttFeedRing()

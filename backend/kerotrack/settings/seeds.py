@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from sqlalchemy import delete, insert, select
+from sqlalchemy import delete, insert, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kerotrack.models.base import utc_now_iso
@@ -82,3 +82,53 @@ def _redact(definition: SettingDef, value: str | None) -> str | None:
     if value is None:
         return None
     return "***" if definition.is_secret else value
+
+
+# Old default -> new default, per key. Only rows still holding the OLD default
+# exactly are rewritten; operator customisations are left alone.
+DEFAULT_VALUE_REWRITES: dict[str, dict[str, str]] = {
+    "schedule.analysis_cron": {"0 6 * * 0": "0 6 * * sun"},
+    "schedule.cost_analysis_cron": {"0 7 * * 0": "0 7 * * sun"},
+    "schedule.notifier_cron": {"0 8 * * 0": "0 8 * * *"},
+}
+
+
+async def migrate_default_values(session: AsyncSession) -> int:
+    """Rewrite stored values that still equal a superseded default.
+
+    Returns the number of rows rewritten. Idempotent.
+    """
+    rows = (
+        await session.execute(
+            select(Setting).where(Setting.key.in_(DEFAULT_VALUE_REWRITES))
+        )
+    ).scalars().all()
+    changed = 0
+    now = utc_now_iso()
+    for row in rows:
+        try:
+            current = json.loads(row.value)
+        except (TypeError, ValueError):
+            continue
+        new = DEFAULT_VALUE_REWRITES[row.key].get(current) if isinstance(current, str) else None
+        if new is None:
+            continue
+        old_encoded = row.value
+        new_encoded = json.dumps(new)
+        await session.execute(
+            update(Setting)
+            .where(Setting.key == row.key)
+            .values(value=new_encoded, updated_at=now)
+        )
+        await session.execute(
+            insert(SettingChange).values(
+                key=row.key,
+                old_value=old_encoded,
+                new_value=new_encoded,
+                changed_at=now,
+                source="migration",
+            )
+        )
+        changed += 1
+    await session.commit()
+    return changed
