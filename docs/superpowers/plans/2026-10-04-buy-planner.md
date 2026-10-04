@@ -26,9 +26,9 @@ Update after every wave. If a session dies, resume from the first unchecked task
 | W1 T7 runway | done | 6ba0034 |
 | W1 T8 quotes package | done | 3474883 |
 | W1 T9 signal | done | 3c56778 |
-| W2 T2 notifier fix + send | todo | |
-| W2 T10 cost periods + days_since | todo | |
-| W2 T11 projection service + consumption | todo | |
+| W2 T2 notifier fix + send | done | e08a056 |
+| W2 T10 cost periods + days_since | done | 69c483e |
+| W2 T11 projection service + consumption | done | f169bfc |
 | W3 T12 quotes store + price service + yournrg retired | todo | |
 | W4 T13 buying job + MQTT + alerts | todo | |
 | W5 T14 buying API | todo | |
@@ -40,6 +40,7 @@ Update after every wave. If a session dies, resume from the first unchecked task
 Notes log (append, newest last):
 - 2026-10-04: baseline backend 336 passed. gitleaks is blocked on Windows by App Control; commit from WSL (`scratchpad/wslcommit.sh`, hooks via `core.hooksPath=~/kt-hooks`). Never `--no-verify`.
 - 2026-10-04 late: Wave 1 complete, all 8 reviewed and approved, suite 392 passed. Next: Wave 2 (T2, T10, T11) in parallel.
+- 2026-10-05 early: Wave 2 complete (T10 took 3 fix rounds: refill log dates lag the real jump by ~12 days, so boundaries snap to the confirmed jump). Suite 425 passed. Next: T12.
 
 ## Global Constraints
 
