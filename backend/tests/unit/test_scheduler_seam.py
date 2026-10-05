@@ -39,3 +39,13 @@ def test_weekly_jobs_fire_on_sunday():
 def test_buying_cron_fires_daily():
     fires = _fires(SETTINGS_CATALOGUE["schedule.buying_cron"].default, datetime(2026, 10, 5, tzinfo=TZ), 3)
     assert len(fires) == 6
+
+
+def test_daily_quotes_cron_fires_once_a_day_mid_morning():
+    fires = _fires(
+        SETTINGS_CATALOGUE["schedule.buying_daily_quotes_cron"].default,
+        datetime(2026, 10, 5, tzinfo=TZ),
+        7,
+    )
+    assert len(fires) == 7
+    assert all((f.hour, f.minute) == (10, 30) for f in fires)

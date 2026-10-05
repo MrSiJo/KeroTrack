@@ -30,8 +30,8 @@ from kerotrack.models.runway_projection import RunwayProjection
 from kerotrack.notifier.send import send
 from kerotrack.projection.service import NORMAL, persist_projection, project
 from kerotrack.quotes.models import QuoteRequest
-from kerotrack.quotes.registry import poll
-from kerotrack.quotes.store import best_recent, latest_poll, save_index, save_poll
+from kerotrack.quotes.registry import poll, select_providers
+from kerotrack.quotes.store import best_recent, latest_per_supplier, save_index, save_poll
 from kerotrack.settings.service import SettingsService
 
 logger = logging.getLogger(__name__)
@@ -123,10 +123,12 @@ async def _has_fresh_index(sf: async_sessionmaker, now: datetime) -> bool:
 
 
 def _best_of_poll(rows: list[PriceQuote], now: datetime) -> PriceQuote | None:
-    """Cheapest ok, non urgent quote in the latest poll (spec Part D).
+    """Cheapest ok, non urgent quote among `rows`.
 
-    The poll must be within ``FRESH_HOURS`` of ``now``; an older latest poll
-    gives no best, so the signal falls back to the index or ``unknown``.
+    `rows` are each supplier's latest poll (``latest_per_supplier``), so a
+    cheaper once a day quote is not hidden by a later poll of another
+    supplier. Quotes older than ``FRESH_HOURS`` are ignored; with none left
+    the signal falls back to the index or ``unknown``.
     """
     cutoff = (now - timedelta(hours=FRESH_HOURS)).strftime(_FMT)
     candidates = [
@@ -144,7 +146,7 @@ def _best_of_poll(rows: list[PriceQuote], now: datetime) -> PriceQuote | None:
 
 
 async def _best_latest(sf: async_sessionmaker, now: datetime) -> PriceQuote | None:
-    return _best_of_poll(await latest_poll(sf), now)
+    return _best_of_poll(await latest_per_supplier(sf, now=now, max_age_h=FRESH_HOURS), now)
 
 
 def _alert_body(payload: dict[str, Any]) -> str:
@@ -175,8 +177,13 @@ async def run_buying(
     http_client: httpx.AsyncClient | None = None,
     now: datetime | None = None,
     apprise_factory: Any = None,
+    cadence: str | None = None,
 ) -> dict:
-    """Run the buying job once and return the summary."""
+    """Run the buying job once and return the summary.
+
+    `cadence` limits the quote poll to providers of that cadence
+    ("frequent" or "daily"); None polls every configured provider.
+    """
     svc = settings_service
     now = now or local_now()
     now_str = now.strftime(_FMT)
@@ -196,13 +203,16 @@ async def run_buying(
             tanker = str(await svc.get("buying.tanker"))
             providers = await svc.get("buying.providers")
             names = [str(p) for p in providers] if isinstance(providers, list) else []
+            names = select_providers(names, cadence)
+            pattern = str(await svc.get("buying.quote_email_pattern") or "")
             req = QuoteRequest(postcode, litres, tanker)
-            if http_client is not None:
-                results = await poll(http_client, req, names)
-            else:
-                async with httpx.AsyncClient() as client:
-                    results = await poll(client, req, names)
-            await save_poll(sf, now_str, litres, results)
+            if names:
+                if http_client is not None:
+                    results = await poll(http_client, req, names, email_pattern=pattern)
+                else:
+                    async with httpx.AsyncClient() as client:
+                        results = await poll(client, req, names, email_pattern=pattern)
+                await save_poll(sf, now_str, litres, results)
         else:
             logger.info("buying: postcode empty; skipping supplier quotes")
     except Exception:  # noqa: BLE001
@@ -411,7 +421,7 @@ async def build_summary(sf: async_sessionmaker, svc: SettingsService, *, now: da
     if scenarios and active not in scenarios:
         active = NORMAL
 
-    quotes = await latest_poll(sf)
+    quotes = await latest_per_supplier(sf, now=now, max_age_h=FRESH_HOURS)
     best = _best_of_poll(quotes, now)
     best_dict = (
         {

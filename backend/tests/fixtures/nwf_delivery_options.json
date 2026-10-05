@@ -1,0 +1,20 @@
+[
+  {
+    "name": "Standard",
+    "day_increment": "5",
+    "cost": "0",
+    "date": "Monday 12th October"
+  },
+  {
+    "name": "Value",
+    "day_increment": "7",
+    "cost": "0",
+    "date": "Wednesday 14th October"
+  },
+  {
+    "name": "Express",
+    "day_increment": "2",
+    "cost": "20",
+    "date": "Thursday 8th October"
+  }
+]

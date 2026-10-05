@@ -1,0 +1,35 @@
+{
+  "quantity": "500",
+  "sector": "residential",
+  "free_one_day_delivery": false,
+  "products": [
+    {
+      "product_id": 182,
+      "product_name": "Standard Kerosene (Heating Oil)",
+      "product_short_description": "Our standard kerosene option is suitable for all home kerosene boilers.",
+      "total_ppl": "125.07",
+      "total_ppl_incvat": "131.32",
+      "total_pence": 62535,
+      "total": "625.35",
+      "total_incvat": "656.62",
+      "depot_pence": 0,
+      "product_pence": 62535,
+      "location_pence": 0,
+      "vehicle_pence": 0
+    },
+    {
+      "product_id": 183,
+      "product_name": "Premier Pure Kerosene (Premium Heating Oil)",
+      "product_short_description": "Our premium kerosene improves the efficiency of your system and can reduce your fuel consumption and CO2 emissions.",
+      "total_ppl": "129.37",
+      "total_ppl_incvat": "135.84",
+      "total_pence": 64685,
+      "total": "646.85",
+      "total_incvat": "679.19",
+      "depot_pence": 0,
+      "product_pence": 64685,
+      "location_pence": 0,
+      "vehicle_pence": 0
+    }
+  ]
+}

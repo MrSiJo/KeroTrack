@@ -46,11 +46,14 @@ async def quotes(
 
 @router.post("/run")
 async def run(request: Request) -> Any:
-    """Run the buying job now and return its summary. Writes no settings."""
+    """Run the buying job now (every configured provider) and return its summary.
+
+    Writes no settings.
+    """
     scheduler = getattr(request.app.state, "scheduler", None)
     if scheduler is None:
         raise HTTPException(status_code=503, detail="scheduler_not_running")
-    return await scheduler.trigger_now("buying")
+    return await scheduler.trigger_now("buying_all")
 
 
 @router.post("/calibrate")

@@ -40,3 +40,9 @@ def test_json_defaults_round_trip() -> None:
         default = SETTINGS_CATALOGUE[key].default
         assert json.loads(json.dumps(default)) == default
     assert len(SETTINGS_CATALOGUE["boiler.hw_schedule"].default) == 2
+
+
+def test_quote_email_pattern_is_secret_and_empty() -> None:
+    d = SETTINGS_CATALOGUE["buying.quote_email_pattern"]
+    assert d.default == "" and d.is_secret is True and d.group == "buying"
+    assert SETTINGS_CATALOGUE["buying.providers"].default == ["homefuelsdirect"]

@@ -342,9 +342,20 @@ async def test_run_job_dispatches_buying(monkeypatch) -> None:
         session_factory="sf", settings_service="svc", publisher="pub", prices="prices"
     )
     assert await jobs.run_job("buying", app_state=state) == {"state": "wait"}
+    await jobs.run_job("buying_daily_quotes", app_state=state)
+    await jobs.run_job("buying_all", app_state=state)
+    base = {"sf": "sf", "settings_service": "svc", "publisher": "pub"}
     assert calls == [
-        {"sf": "sf", "settings_service": "svc", "publisher": "pub", "prices": "prices"}
+        {**base, "prices": "prices", "cadence": "frequent"},
+        {**base, "prices": None, "cadence": "daily"},
+        {**base, "prices": "prices", "cadence": None},
     ]
+
+
+def test_scheduler_maps_daily_quotes_job() -> None:
+    assert "buying_daily_quotes" in jobs.JOB_NAMES and "buying_all" in jobs.JOB_NAMES
+    assert _JOB_TO_SETTING["buying_daily_quotes"] == "schedule.buying_daily_quotes_cron"
+    assert "buying_all" not in _JOB_TO_SETTING
 
 
 def _quote(fetched: datetime, ppl_eff: float) -> PriceQuote:
@@ -545,3 +556,118 @@ async def test_summary_reports_nest_model_when_active(
     again = await build_summary(sf, seeded_settings, now=now)
     assert again["heating_model"] == "nest"
     assert again["l_per_heating_hour"] == summary["l_per_heating_hour"]
+
+
+# --- per supplier best (more supplier quotes spec) --------------------------
+
+
+def _sq(fetched: datetime, ppl_eff: float, supplier: str, **kw) -> PriceQuote:
+    row = _quote(fetched, ppl_eff)
+    row.supplier = supplier
+    for k, v in kw.items():
+        setattr(row, k, v)
+    return row
+
+
+async def test_cheaper_daily_quote_survives_a_later_frequent_poll(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    """10:30 Western is cheaper than the 13:00 HFD poll: it stays the best."""
+    await _add(
+        sf,
+        _sq(NOW.replace(hour=10, minute=30), 104.0, "westernfuel"),
+        _sq(NOW.replace(hour=13), 110.0, "homefuelsdirect"),
+    )
+    summary = await build_summary(sf, seeded_settings, now=NOW)
+    assert summary["best"]["supplier"] == "westernfuel"
+    assert {q["supplier"] for q in summary["quotes"]} == {"westernfuel", "homefuelsdirect"}
+
+
+async def test_quote_older_than_36h_is_ignored_for_best(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    await _add(
+        sf,
+        _sq(NOW - timedelta(hours=40), 90.0, "westernfuel"),
+        _sq(NOW.replace(hour=13), 110.0, "homefuelsdirect"),
+    )
+    summary = await build_summary(sf, seeded_settings, now=NOW)
+    assert summary["best"]["supplier"] == "homefuelsdirect"
+    assert {q["supplier"] for q in summary["quotes"]} == {"homefuelsdirect"}
+
+
+async def test_each_supplier_uses_its_own_latest_poll(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    """HFD's morning price was cheaper but its afternoon poll replaces it."""
+    await _add(
+        sf,
+        _sq(NOW.replace(hour=7), 100.0, "homefuelsdirect"),
+        _sq(NOW.replace(hour=10, minute=30), 108.0, "westernfuel"),
+        _sq(NOW.replace(hour=13), 112.0, "homefuelsdirect"),
+    )
+    summary = await build_summary(sf, seeded_settings, now=NOW)
+    assert summary["best"]["supplier"] == "westernfuel"
+    assert len(summary["quotes"]) == 2
+
+
+async def test_failed_latest_poll_keeps_the_last_ok_quote(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    await _add(
+        sf,
+        _sq(NOW.replace(hour=7), 104.0, "westernfuel"),
+        _sq(NOW.replace(hour=13), 0.0, "westernfuel", ok=0, total_inc_vat=None,
+            ppl_effective=None, error="boom"),
+    )
+    summary = await build_summary(sf, seeded_settings, now=NOW)
+    assert summary["best"]["supplier"] == "westernfuel"
+    assert summary["best"]["fetched_at"] == NOW.replace(hour=7).strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def test_supplier_with_only_failures_shows_its_error(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    await _add(
+        sf,
+        _sq(NOW.replace(hour=13), 110.0, "homefuelsdirect"),
+        _sq(NOW.replace(hour=10, minute=30), 0.0, "nwffuels", ok=0, total_inc_vat=None,
+            ppl_effective=None, error="no email configured"),
+    )
+    summary = await build_summary(sf, seeded_settings, now=NOW)
+    errors = [q for q in summary["quotes"] if q["supplier"] == "nwffuels"]
+    assert errors and errors[0]["error"] == "no email configured"
+
+
+@respx.mock(assert_all_called=False)
+async def test_cadence_limits_which_providers_poll(
+    respx_mock, sf: async_sessionmaker, seeded_settings
+) -> None:
+    hfd = respx_mock.get(HFD_URL).respond(json=FIX)
+    wf = respx_mock.post("https://www.westernfuel.co.uk/api/quote").respond(json={"ok": False})
+    await _seed_readings(sf, NOW)
+    await _configure(seeded_settings)
+    await seeded_settings.set("buying.providers", ["homefuelsdirect", "westernfuel"])
+    await seeded_settings.set("buying.quote_email_pattern", "{site}@example.net")
+
+    await run_buying(sf=sf, settings_service=seeded_settings, publisher=None, now=NOW,
+                     cadence="daily")
+    assert (wf.call_count, hfd.call_count) == (1, 0)
+
+    await run_buying(sf=sf, settings_service=seeded_settings, publisher=None, now=NOW,
+                     cadence="frequent")
+    assert (wf.call_count, hfd.call_count) == (1, 1)
+
+
+@respx.mock(assert_all_called=False)
+async def test_daily_run_with_no_daily_providers_writes_nothing(
+    respx_mock, sf: async_sessionmaker, seeded_settings
+) -> None:
+    respx_mock.get(HFD_URL).respond(json=FIX)
+    await _seed_readings(sf, NOW)
+    await _configure(seeded_settings)
+    await run_buying(sf=sf, settings_service=seeded_settings, publisher=None, now=NOW,
+                     cadence="daily")
+    async with sf() as session:
+        n = (await session.execute(select(func.count()).select_from(PriceQuote))).scalar_one()
+    assert n == 0

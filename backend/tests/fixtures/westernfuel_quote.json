@@ -1,0 +1,50 @@
+{
+  "ok": true,
+  "litres": 500,
+  "fuelType": "Kero",
+  "tankerType": "Standard",
+  "postcode": "ZZ99 9ZZ",
+  "email": "westernfuel@example.net",
+  "brand": "western",
+  "tiers": [
+    {
+      "id": "standard",
+      "name": "Standard",
+      "pricePerLitrePence": 104.43,
+      "leadTime": "3\u20135 working days",
+      "deliveryDate": "2026-10-16",
+      "subtotalPence": 52215,
+      "serviceChargePence": 1200,
+      "vatPence": 2611,
+      "totalPence": 56026
+    },
+    {
+      "id": "express",
+      "name": "Express",
+      "pricePerLitrePence": 105.47,
+      "leadTime": "2\u20133 working days",
+      "deliveryDate": "2026-10-09",
+      "subtotalPence": 52735,
+      "serviceChargePence": 1200,
+      "vatPence": 2637,
+      "totalPence": 56572
+    }
+  ],
+  "mock": false,
+  "medusa_cart_id": "redacted",
+  "cart_token": "redacted",
+  "medusa_quote_saved": true,
+  "customerSegment": "new_customer",
+  "customerType": "new_customer",
+  "isNewCustomer": true,
+  "isBoilerJuiceTransfer": false,
+  "isNonBuyer": true,
+  "nonBuyerMonths": 16,
+  "bnplAllowed": false,
+  "paymentMethods": [
+    "card"
+  ],
+  "walletMethods": [
+    "apple_pay"
+  ]
+}

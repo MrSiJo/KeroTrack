@@ -18,6 +18,7 @@ _JOB_TO_SETTING = {
     "cost_analysis": "schedule.cost_analysis_cron",
     "notifier": "schedule.notifier_cron",
     "buying": "schedule.buying_cron",
+    "buying_daily_quotes": "schedule.buying_daily_quotes_cron",
 }
 
 

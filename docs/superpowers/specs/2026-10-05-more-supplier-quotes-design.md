@@ -1,6 +1,13 @@
 # More supplier quotes: The Heating Oil Company, NWF, Western Fuel (and BoilerJuice)
 
-**Status:** Draft for a NEW session. Owner approved the direction 2026-10-05 ("unpark the email suppliers"). Not started.
+**Status:** Implemented 2026-10-05. Owner approved the direction 2026-10-05 ("unpark the email suppliers").
+
+> **Spike outcome (2026-10-05): all four suppliers work over plain HTTP; none dropped.**
+> - The Heating Oil Company: the GET quote URL works headless once `email` and `heardfrom` are sent; server rendered HTML.
+> - NWF: prices from `POST /wp-json/nwf-fuels/v1/quote-update` (JSON body `{"action":"get_costs","data":{...}}`); delivery tiers, dates and any per tier charge (ex VAT) from `POST /wp-admin/admin-ajax.php` `action=get_delivery_options`. The marketing opt in is a separate call (`send_opt_in_email_to_active_campaign`) that is never made.
+> - Western Fuel: `POST /api/quote` with JSON `{litres, fuelType: "Kero", tankerType: "Standard", postcode, email}` returns tiers with `totalPence`, `serviceChargePence` (£12, which explains the stated ppl not reconciling) and `deliveryDate`.
+> - BoilerJuice: GET the quote form for a session cookie and `authenticity_token`, POST the form (302), GET the quote page; cards carry `data-delivery-date` and `data-price`. `deliveryN` means within N working days; N <= 2 is treated as urgent. `opt_out_email=1` is sent.
+> - Manual "Check prices now" (`POST /api/buying/run`) runs job `buying_all`, which polls every configured provider; the scheduled `buying` run polls only frequent providers, and `buying_daily_quotes` only the daily ones (without refreshing the national index).
 **Date:** 2026-10-05
 
 This spec is self contained: a fresh session should be able to start from it without the conversation that produced it. Read the "Where things stand" section first, then the supplier dossier.

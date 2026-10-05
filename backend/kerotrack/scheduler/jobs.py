@@ -14,7 +14,18 @@ from kerotrack.notifier.apprise_notifier import run as _run_notifier
 logger = logging.getLogger(__name__)
 
 
-JOB_NAMES = ("analysis", "cost_analysis", "notifier", "buying")
+# "buying" is the scheduled run (frequent providers), "buying_daily_quotes"
+# the once a day run for providers that need an email, and "buying_all" the
+# manual "Check prices now" run that polls every configured provider.
+JOB_NAMES = (
+    "analysis",
+    "cost_analysis",
+    "notifier",
+    "buying",
+    "buying_daily_quotes",
+    "buying_all",
+)
+_BUYING_CADENCE = {"buying": "frequent", "buying_daily_quotes": "daily", "buying_all": None}
 
 
 async def run_job(name: str, *, app_state) -> Any:
@@ -50,13 +61,15 @@ async def run_job(name: str, *, app_state) -> Any:
         return result
     if name == "notifier":
         return await _run_notifier(sf=sf, settings_service=svc)
-    if name == "buying":
+    if name in _BUYING_CADENCE:
         # MQTT is optional for this job: run_buying skips the publish
-        # when no publisher is available.
+        # when no publisher is available. The daily quotes run leaves the
+        # national index to the main runs.
         return await run_buying(
             sf=sf,
             settings_service=svc,
             publisher=publisher,
-            prices=getattr(app_state, "prices", None),
+            prices=None if name == "buying_daily_quotes" else getattr(app_state, "prices", None),
+            cadence=_BUYING_CADENCE[name],
         )
     raise ValueError(f"unknown job: {name}")

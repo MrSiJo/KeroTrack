@@ -76,6 +76,7 @@ EXPECTED_KEYS: list[tuple[str, str, str, object, bool]] = [
     ("buying.min_order_litres", "int", "buying", 500, False),
     ("buying.tanker", "string", "buying", "standard", False),
     ("buying.providers", "json", "buying", ["homefuelsdirect"], False),
+    ("buying.quote_email_pattern", "secret", "buying", "", True),
     ("buying.trigger_ppl", "float", "buying", 0.0, False),
     ("buying.safe_fill_pct", "float", "buying", 0.95, False),
     ("buying.warn_days", "int", "buying", 14, False),
@@ -89,6 +90,7 @@ EXPECTED_KEYS: list[tuple[str, str, str, object, bool]] = [
         "cold": {"11": 1.3, "12": 1.3, "1": 1.3, "2": 1.3, "3": 1.3},
     }, False),
     ("schedule.buying_cron", "cron", "schedule", "0 7,13 * * *", False),
+    ("schedule.buying_daily_quotes_cron", "cron", "schedule", "30 10 * * *", False),
     ("mqtt.topic_buying", "string", "mqtt", "oiltank/buying", False),
     ("mqtt.topic_nest_heating", "string", "mqtt", "kerotrack/nest_heating", False),
 ]
@@ -118,4 +120,4 @@ def test_get_setting_def_unknown_raises() -> None:
 
 def test_secret_keys_are_flagged() -> None:
     secrets = {k for k, v in SETTINGS_CATALOGUE.items() if v.is_secret}
-    assert secrets == {"mqtt.password", "buying.postcode"}
+    assert secrets == {"mqtt.password", "buying.postcode", "buying.quote_email_pattern"}

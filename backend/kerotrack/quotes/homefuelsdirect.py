@@ -16,6 +16,8 @@ def _window_n(key: str) -> int:
 
 class HomeFuelsDirect:
     name = "homefuelsdirect"
+    requires_email = False
+    cadence = "frequent"
     BASE_URL = "https://homefuelsdirect.co.uk/index.php"
 
     def parse(self, payload: object, litres: int) -> list[QuoteOption]:

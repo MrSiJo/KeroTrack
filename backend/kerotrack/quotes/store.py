@@ -94,6 +94,38 @@ async def latest_poll(sf: async_sessionmaker) -> list[PriceQuote]:
         return list(res.scalars().all())
 
 
+async def latest_per_supplier(
+    sf: async_sessionmaker, *, now: datetime, max_age_h: int = 36
+) -> list[PriceQuote]:
+    """Each supplier's newest quote poll within `max_age_h` of `now`.
+
+    Suppliers poll at different times (some once a day), so "the latest
+    poll" is per supplier. A supplier's newest poll with an ok row wins; a
+    supplier with only failures in the window gives its newest failed poll,
+    so the error is still visible. Falls back to the overall latest poll
+    when nothing is inside the window.
+    """
+    cutoff = (now - timedelta(hours=max_age_h)).strftime(_FMT)
+    async with sf() as session:
+        res = await session.execute(
+            select(PriceQuote)
+            .where(PriceQuote.kind == "quote", PriceQuote.fetched_at >= cutoff)
+            .order_by(PriceQuote.id)
+        )
+        rows = list(res.scalars().all())
+    if not rows:
+        return await latest_poll(sf)
+    newest_ok: dict[str, str] = {}
+    newest_any: dict[str, str] = {}
+    for r in rows:
+        if r.fetched_at > newest_any.get(r.supplier, ""):
+            newest_any[r.supplier] = r.fetched_at
+        if r.ok == 1 and r.fetched_at > newest_ok.get(r.supplier, ""):
+            newest_ok[r.supplier] = r.fetched_at
+    pick = {s: newest_ok.get(s, at) for s, at in newest_any.items()}
+    return [r for r in rows if r.fetched_at == pick[r.supplier]]
+
+
 async def best_recent(
     sf: async_sessionmaker,
     *,

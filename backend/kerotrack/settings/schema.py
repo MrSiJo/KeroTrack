@@ -419,6 +419,14 @@ def _entries() -> list[SettingDef]:
             "0 7,13 * * *",
             "When the buy planner refreshes prices and its recommendation.",
         ),
+        SettingDef(
+            "schedule.buying_daily_quotes_cron",
+            "cron",
+            "schedule",
+            "Daily supplier quotes cron",
+            "30 10 * * *",
+            "When suppliers that need an email address are quoted (once a day).",
+        ),
     ]
 
     # buying -------------------------------------------------------------
@@ -463,6 +471,16 @@ def _entries() -> list[SettingDef]:
             "Price providers",
             ["homefuelsdirect"],
             "Supplier price providers to query, by identifier.",
+        ),
+        SettingDef(
+            "buying.quote_email_pattern",
+            "secret",
+            "buying",
+            "Quote email pattern",
+            "",
+            "Address given to suppliers that need one, e.g. {site}@your-domain. "
+            "{site} becomes the supplier name. Empty skips those suppliers.",
+            is_secret=True,
         ),
         SettingDef(
             "buying.trigger_ppl",
