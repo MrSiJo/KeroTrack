@@ -18,6 +18,8 @@ import {
   stateSentence,
   stateToneClass,
   timelineGeometry,
+  roughDate,
+  trendSentence,
 } from "$lib/countdown";
 import type { BuyingQuote, BuyingScenario, BuyingSummary } from "$lib/types/api";
 
@@ -382,5 +384,39 @@ describe("heating model", () => {
     expect(nestMonthsText(1, 0)).toBe("1 month used, 0 excluded (sensor blind)");
     expect(nestMonthsText(null, 3)).toBe("n/a months used, 3 excluded (sensor blind)");
     expect(nestMonthsText(4, null)).toBe("4 months used, n/a excluded (sensor blind)");
+  });
+});
+
+describe("trendSentence", () => {
+  const base = {
+    status: "falling" as const,
+    peak_date: "2026-09-18",
+    peak_ppl: 119.9,
+    current_ppl: 114.0,
+    ppl_per_week: -1.54,
+    projected_date: "2026-12-24",
+    target_ppl: 95,
+  };
+  it("falling gives a rough month and the winter caveat", () => {
+    expect(trendSentence(base, "2027-01-22")).toBe(
+      "Guide only: prices have fallen about 1.5p a litre a week since 18 Sep. At that pace your 95.0p target could appear in late December. Prices usually rise into winter, so treat this as a best case.",
+    );
+  });
+  it("too slow for the order by date", () => {
+    const text = trendSentence({ ...base, status: "after_order_by" }, "2027-01-22");
+    expect(text).toContain("95.0p is unlikely before your order by date (22 Jan)");
+  });
+  it("flat and quiet cases", () => {
+    expect(trendSentence({ ...base, status: "not_falling" }, null)).toBe(
+      "Guide only: no downward price trend at the moment.",
+    );
+    for (const status of ["too_early", "at_target", "no_target"] as const)
+      expect(trendSentence({ ...base, status }, null)).toBeNull();
+    expect(trendSentence(null, null)).toBeNull();
+  });
+  it("rough dates", () => {
+    expect(roughDate("2026-11-03")).toBe("early November");
+    expect(roughDate("2026-11-15")).toBe("mid November");
+    expect(roughDate("2027-01-21")).toBe("late January");
   });
 });

@@ -711,3 +711,30 @@ async def test_best_ppl_keeps_precision_so_display_rounding_matches_the_table(
     await _add(sf, row)
     summary = await build_summary(sf, seeded_settings, now=NOW)
     assert summary["best"]["ppl"] == pytest.approx(112.052)
+
+
+
+async def test_summary_carries_a_price_trend_guide(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    """readings fall 0.5p/day ex VAT from a peak 20 days ago: a falling trend."""
+    await seeded_settings.set("buying.trigger_ppl", 95.0)
+    async with sf() as session:
+        for i in range(21):
+            d = NOW - timedelta(days=20 - i)
+            session.add(
+                Reading(
+                    date=d.strftime("%Y-%m-%d %H:%M:%S"),
+                    id="probe",
+                    litres_remaining=500.0,
+                    refill_detected="n",
+                    leak_detected="n",
+                    current_ppl=110.0 - 0.5 * i,
+                )
+            )
+        await session.commit()
+    trend = (await build_summary(sf, seeded_settings, now=NOW))["price_trend"]
+    assert trend["status"] in {"falling", "after_order_by"}
+    # VAT added: 0.5p/day ex VAT is 0.525p/day real, 3.675p a week.
+    assert trend["ppl_per_week"] == pytest.approx(-3.675, abs=0.01)
+    assert trend["projected_date"] is not None

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kerotrack.analysis.hdd_rollup import aggregate_daily_hdd
 from kerotrack.buying.signal import ALERT_STATES, SignalInputs, compute_state
+from kerotrack.buying.trend import LOOKBACK_DAYS, price_trend
 from kerotrack.clock import local_now
 from kerotrack.models.buying_state import BuyingState
 from kerotrack.models.price_quote import PriceQuote
@@ -29,7 +30,7 @@ from kerotrack.models.reading import Reading, trusted_readings_clause
 from kerotrack.models.runway_projection import RunwayProjection
 from kerotrack.notifier.send import send
 from kerotrack.projection.service import NORMAL, persist_projection, project
-from kerotrack.quotes.models import QuoteRequest, all_in_ppl
+from kerotrack.quotes.models import VAT_RATE, QuoteRequest, all_in_ppl
 from kerotrack.quotes.registry import poll, select_providers
 from kerotrack.quotes.store import best_recent, latest_per_supplier, save_index, save_poll
 from kerotrack.settings.service import SettingsService
@@ -391,6 +392,32 @@ def _spread_today(rows: list[PriceQuote], now: datetime) -> float | None:
     return round(max(per_supplier.values()) - min(per_supplier.values()), 2)
 
 
+async def _daily_prices(sf: async_sessionmaker, now: datetime) -> list[tuple[date, float]]:
+    """Daily mean real price per litre (VAT added) from readings' current_ppl.
+
+    current_ppl is ex VAT: the best supplier quote (fees included) once
+    quotes exist, a scraped price before that.
+    """
+    since = (now - timedelta(days=LOOKBACK_DAYS)).strftime(_FMT)
+    day = func.substr(Reading.date, 1, 10)
+    async with sf() as session:
+        rows = (
+            await session.execute(
+                select(day, func.avg(Reading.current_ppl))
+                .where(Reading.current_ppl > 0, Reading.date >= since)
+                .group_by(day)
+                .order_by(day)
+            )
+        ).all()
+    out: list[tuple[date, float]] = []
+    for d, ppl in rows:
+        try:
+            out.append((date.fromisoformat(d), float(ppl) * (1 + VAT_RATE)))
+        except (TypeError, ValueError):
+            continue
+    return out
+
+
 def _quote_dict(row: PriceQuote) -> dict[str, Any]:
     return {name: getattr(row, name) for name in _QUOTE_FIELDS}
 
@@ -462,12 +489,26 @@ async def build_summary(sf: async_sessionmaker, svc: SettingsService, *, now: da
     )
 
     headroom = await _headroom(sf, svc)
+    trigger = await _trigger_ppl(svc)
+    order_by_iso = (scenarios.get(active) or {}).get("order_by")
+    try:
+        order_by_date = date.fromisoformat(order_by_iso) if order_by_iso else None
+    except ValueError:
+        order_by_date = None
+    trend = price_trend(
+        await _daily_prices(sf, now),
+        today=now.date(),
+        target_ppl=trigger,
+        order_by=order_by_date,
+    )
     return {
         "state": state_row.state if state_row is not None else "unknown",
         "updated_at": state_row.updated_at if state_row is not None else None,
-        "trigger_ppl": await _trigger_ppl(svc),
+        "trigger_ppl": trigger,
         "headroom_l": _round(headroom, 1),
         "best": best_dict,
+        # A hedged guide only; it never feeds the signal or alerts.
+        "price_trend": trend.to_dict(),
         "quotes": [_quote_dict(q) for q in quotes],
         "scenarios": scenarios,
         "active_scenario": active,

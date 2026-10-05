@@ -151,6 +151,8 @@ export type BuyingSummary = {
   updated_at: string | null;
   trigger_ppl: number | null;
   headroom_l: number | null;
+  /** Hedged guide to when the trigger might be reached; never drives alerts. */
+  price_trend?: PriceTrend | null;
   best: {
     supplier: string;
     total_inc_vat: number;
@@ -196,4 +198,21 @@ export type BuyingCalibration = {
   hw_per_day_nest?: number | null;
   nest_months_used?: number | null;
   nest_months_excluded?: number | null;
+};
+
+export type PriceTrend = {
+  status:
+    | "too_early"
+    | "no_target"
+    | "at_target"
+    | "not_falling"
+    | "falling"
+    | "after_order_by"
+    | "too_far";
+  peak_date: string | null;
+  peak_ppl: number | null;
+  current_ppl: number | null;
+  ppl_per_week: number | null;
+  projected_date: string | null;
+  target_ppl: number | null;
 };

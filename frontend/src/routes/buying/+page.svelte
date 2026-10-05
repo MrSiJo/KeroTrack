@@ -13,6 +13,7 @@
   import {
     formatDate,
     groupQuotesBySupplier,
+    trendSentence,
     hasEnoughHistory,
     priceSummary,
     quoteDayCount,
@@ -86,6 +87,13 @@
   let prices = $derived(priceSummary(history));
   // Same basis as the price history: the day's best real price per litre.
   let todayBest = $derived(prices.latestBest);
+  let trendText = $derived(
+    trendSentence(
+      summary?.price_trend,
+      summary?.scenarios[summary.active_scenario ?? "normal"]?.order_by ??
+        summary?.scenarios.normal?.order_by,
+    ),
+  );
 </script>
 
 <div class="space-y-6">
@@ -112,6 +120,9 @@
     <!-- 1. The answer -->
     <div>
       <OrderCountdown {summary} />
+      {#if trendText}
+        <p class="mt-2 text-sm text-text-muted">{trendText}</p>
+      {/if}
       <p class="mt-2 text-xs text-text-subtle">
         Room for {fixed(summary.headroom_l, 0)} L in the tank.
         {#if change !== null}

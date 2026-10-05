@@ -3,7 +3,7 @@
 // GET /api/buying/summary (active scenario, falling back to "normal").
 
 import { daysUntil, fixed, formatGBP, formatPpl, latestQuotes, priceHistory, supplierName, withVat } from "$lib/buying";
-import type { BuyingQuote, BuyingScenario, BuyingSummary } from "$lib/types/api";
+import type { BuyingQuote, BuyingScenario, BuyingSummary, PriceTrend } from "$lib/types/api";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
@@ -261,4 +261,45 @@ export function nestMonthsText(
   const u = typeof used === "number" && Number.isFinite(used) ? String(used) : "n/a";
   const x = typeof excluded === "number" && Number.isFinite(excluded) ? String(excluded) : "n/a";
   return `${u} ${used === 1 ? "month" : "months"} used, ${x} excluded (sensor blind)`;
+}
+
+const LONG_MONTHS = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+];
+
+/** "early November", "mid December", "late January": never an exact day. */
+export function roughDate(iso: string | null | undefined): string | null {
+  const p = parts(iso);
+  if (!p) return null;
+  const part = p[2] <= 10 ? "early" : p[2] <= 20 ? "mid" : "late";
+  return `${part} ${LONG_MONTHS[p[1] - 1]}`;
+}
+
+/**
+ * One hedged sentence on when the trigger might be reached, or null when
+ * there is nothing useful to say (no trigger, already there, too early).
+ */
+export function trendSentence(
+  trend: PriceTrend | null | undefined,
+  orderBy: string | null | undefined,
+): string | null {
+  if (!trend) return null;
+  const target = formatPpl(trend.target_ppl);
+  const since = trend.peak_date ? ` since ${formatDate(trend.peak_date).replace(/ \d{4}$/, "")}` : "";
+  const pace =
+    trend.ppl_per_week !== null
+      ? `prices have fallen about ${Math.abs(trend.ppl_per_week).toFixed(1)}p a litre a week${since}.`
+      : "";
+  switch (trend.status) {
+    case "falling":
+      return `Guide only: ${pace} At that pace your ${target} target could appear in ${roughDate(trend.projected_date)}. Prices usually rise into winter, so treat this as a best case.`;
+    case "after_order_by":
+    case "too_far":
+      return `Guide only: ${pace} At that pace ${target} is unlikely before your order by date${orderBy ? ` (${formatDate(orderBy).replace(/ \d{4}$/, "")})` : ""}.`;
+    case "not_falling":
+      return "Guide only: no downward price trend at the moment.";
+    default:
+      return null;
+  }
 }
