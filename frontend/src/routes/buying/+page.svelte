@@ -147,11 +147,11 @@
             <thead class="text-[10px] uppercase tracking-wide text-text-label">
               <tr>
                 <th class="px-3 py-2">Supplier</th>
-                <th class="px-3 py-2">Delivery</th>
-                <th class="px-3 py-2 text-right">Total</th>
                 <th class="px-3 py-2 text-right" title="Total divided by litres: VAT, delivery and fees included">Per litre</th>
                 <th class="px-3 py-2 text-right" title="Per litre with fees included but VAT removed; the buy trigger uses this">Ex VAT</th>
+                <th class="px-3 py-2">Delivery</th>
                 <th class="px-3 py-2 text-right">Fees</th>
+                <th class="px-3 py-2 text-right">Total</th>
                 <th class="px-3 py-2">Age</th>
               </tr>
             </thead>
@@ -162,21 +162,21 @@
                   class:text-text-subtle={!primaryIds.has(r.id)}
                 >
                   <td class="px-3 py-1.5">{supplierName(r.supplier)}</td>
-                  <td class="px-3 py-1.5">
-                    {r.delivery_label ?? "n/a"}
-                    {#if r.urgent}
-                      <span class="ml-1 rounded bg-bg-elev px-1.5 py-0.5 text-[10px] text-brand-amber">
-                        faster
-                      </span>
-                    {/if}
-                  </td>
                   {#if r.ok}
-                    <td class="px-3 py-1.5 text-right font-mono">{formatGBP(r.total_inc_vat)}</td>
                     <td class="px-3 py-1.5 text-right font-mono">{formatPpl(allInPpl(r))}</td>
                     <td class="px-3 py-1.5 text-right font-mono text-text-muted">{formatPpl(r.ppl_effective)}</td>
+                    <td class="px-3 py-1.5">
+                      {r.delivery_label ?? "n/a"}
+                      {#if r.urgent}
+                        <span class="ml-1 rounded bg-bg-elev px-1.5 py-0.5 text-[10px] text-brand-amber">
+                          faster
+                        </span>
+                      {/if}
+                    </td>
                     <td class="px-3 py-1.5 text-right font-mono">{formatGBP(r.fees_inc_vat ?? 0)}</td>
+                    <td class="px-3 py-1.5 text-right font-mono">{formatGBP(r.total_inc_vat)}</td>
                   {:else}
-                    <td colspan="4" class="px-3 py-1.5 text-brand-red">
+                    <td colspan="5" class="px-3 py-1.5 text-brand-red">
                       Failed{r.error ? `: ${r.error}` : ""}
                     </td>
                   {/if}
