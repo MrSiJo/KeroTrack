@@ -231,7 +231,7 @@ Commit message: `ui: real CSS popover tooltip on settings rows + per-group reset
   <textarea
     class="w-full rounded border border-border bg-bg-elev px-2 py-1 font-mono text-xs"
     rows="3"
-    placeholder="One URL per line — e.g. gotify://192.168.1.10/AbC123"
+    placeholder="One URL per line — e.g. gotify://gotify.example/AbC123"
     oninput={(e) => {
       const raw = (e.currentTarget as HTMLTextAreaElement).value;
       const arr = raw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);

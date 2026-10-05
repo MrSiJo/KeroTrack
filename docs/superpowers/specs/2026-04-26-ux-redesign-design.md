@@ -129,7 +129,7 @@ All heroes read from existing API endpoints. No new backend work; if any hero ne
 ┌─────────────┬───────────────────────────────────┐
 │  Search…    │  MQTT — broker connection (10)    │
 ├─────────────┤  ─────────────────────────────────│
-│  Tank   (6) │  Broker host    [172.16.0.21]    │
+│  Tank   (6) │  Broker host    [broker.local]   │
 │ ▶MQTT  (10) │  Broker port    [1883]           │
 │  Schedule(4)│  Username       [kerotrack]      │
 │  Boiler (10)│  Password [secret] ••••••••       │

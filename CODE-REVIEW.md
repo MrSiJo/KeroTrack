@@ -9,7 +9,7 @@ This is a code-quality review of KeroTrack-v2, one of Simon's personal projects.
 1. **IDs** are `KERO-<PRIORITY><n>` — `H` high, `M` medium, `L` low/polish.
 2. **Scope discipline:** findings are about code quality, correctness, optimisation, and consistency — do NOT add features, change end-user functionality, or redesign UI. Keep each fix minimal and targeted.
 3. **This is a personal project** — don't add enterprise ceremony unless a finding explicitly calls for it.
-4. **Deployment caution:** this app runs in production on a remote docker host (`ssh://root@172.16.0.83`, docker context `docker-host`) with prod data bind-mounted via a local-only `compose.override.yaml`. Do not deploy or touch prod data unless explicitly asked.
+4. **Deployment caution:** this app runs in production on a remote docker host (docker context `docker-host`, address set in the developer's local Docker config) with prod data bind-mounted via a local-only `compose.override.yaml`. Do not deploy or touch prod data unless explicitly asked.
 5. **Verify line numbers before editing** — this is a snapshot from 2026-07-08; re-locate code by the symbols/strings named in the finding.
 6. Run the test suites (pytest — ~256 backend tests; vitest + Playwright frontend) before and after changes; each finding's `Verify:` note gives a functional check.
 7. **Secrets:** untracked local `.env` files are known and fine — do not "fix" them.

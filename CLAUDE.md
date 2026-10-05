@@ -134,3 +134,31 @@ Every non-trivial change follows the same ritual. Do not skip steps because a ch
    Rollback = restore the copy + start the previous image.
 6. **Deploy** to the `docker-host` context on the LAN (never the `default` context) using this repo's documented deploy method, then verify: containers healthy, endpoint smoke checks pass, logs clean.
 7. **Ship it properly.** Conventional commit messages, push to `origin/main`, and where the repo has GitHub Actions (public images / release-please), confirm the runs go green.
+
+## Deployment: deliberately NOT Dockge-managed
+
+Decided 2026-07-26, when the homelab Docker hosts standardised their Dockge
+stacks on one directory. The Track apps were **deliberately excluded** from
+that migration. Do not move this app's compose onto the host to make Dockge
+see it.
+
+**Why.** This app deploys from this repo over the developer's local Docker
+context, so the repo compose is the single source of truth: versioned and
+reproducible, which a hand-edited Dockge stack is not. Migrating would mean
+two compose definitions that silently drift, with Dockge quietly becoming
+authoritative.
+
+This app already publishes images to `ghcr.io`, so it *could* be moved, but
+it is kept alongside the other Track apps for consistency, and the source of
+truth argument above applies regardless.
+
+**Visibility is not a reason to move it.** The homelab dashboard's container
+widget reads the host's read-only Docker socket proxy, so this app's
+containers already appear there with live health state wherever the compose
+lives. Dockge would only add start/stop buttons for something deployed by
+command anyway.
+
+**Worth doing (not yet done):** pin an explicit top-level `name:` in this
+repo's compose matching the current project name. That stops the project
+name depending on the directory path, which is what protects named volumes
+from being orphaned if the checkout ever moves.
