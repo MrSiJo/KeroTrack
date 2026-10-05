@@ -9,8 +9,10 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query, Request
 
 from kerotrack.analysis.hot_water import hw_litres_per_day_avg
+from kerotrack.analysis.nest_model import daily_heating_hours
 from kerotrack.buying.service import build_summary
 from kerotrack.clock import local_now
+from kerotrack.ingest.nest import load_nest_daily, load_nest_monthly
 from kerotrack.models.price_quote import PriceQuote
 from kerotrack.projection.service import load_hw, run_calibration
 from kerotrack.quotes.store import history
@@ -42,6 +44,24 @@ async def quotes(
         since=local_now() - timedelta(days=days),
     )
     return {"items": [_to_dict(r) for r in rows]}
+
+
+@router.get("/heating-hours")
+async def heating_hours(
+    request: Request,
+    days: int = Query(default=400, ge=1, le=730),
+) -> dict[str, Any]:
+    """Heating hours per day for the past usage trend (Nest model)."""
+    sf = request.app.state.session_factory
+    end = local_now().date()
+    start = end - timedelta(days=days)
+    items = daily_heating_hours(
+        start,
+        end,
+        daily=await load_nest_daily(sf, start.isoformat()),
+        monthly=await load_nest_monthly(sf),
+    )
+    return {"items": items}
 
 
 @router.post("/run")

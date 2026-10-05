@@ -171,3 +171,37 @@ def test_run_without_scheduler_503(app_client) -> None:
         app.state.scheduler = saved
     assert resp.status_code == 503
     assert resp.json()["detail"] == "scheduler_not_running"
+
+
+def test_heating_hours_unauthenticated_401(app_client) -> None:
+    c, _ = app_client
+    assert c.get("/api/buying/heating-hours").status_code == 401
+
+
+@pytest.mark.parametrize("days", [0, 731])
+def test_heating_hours_days_bounds(app_client, days: int) -> None:
+    c, _ = app_client
+    _login(c)
+    assert c.get(f"/api/buying/heating-hours?days={days}").status_code == 422
+
+
+def test_heating_hours_shape(app_client) -> None:
+    from kerotrack.clock import local_now
+    from kerotrack.models.nest_heating_daily import NestHeatingDaily
+
+    c, app = app_client
+    _login(c)
+    today = local_now().date().isoformat()
+
+    async def _go() -> None:
+        async with app.state.session_factory() as s:
+            s.add(NestHeatingDaily(date=today, heating_hours=2.5, received_at=local_now_str()))
+            await s.commit()
+
+    c.portal.call(_go)
+    resp = c.get("/api/buying/heating-hours?days=10")
+    assert resp.status_code == 200
+    items = resp.json()["items"]
+    assert len(items) == 11
+    assert items[-1] == {"date": today, "hours": 2.5, "source": "daily"}
+    assert items[0]["source"] == "average"

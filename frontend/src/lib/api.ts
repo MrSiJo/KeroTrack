@@ -205,6 +205,11 @@ export const api = {
   getBuyingSummary: () => request<BuyingSummary>("GET", "/api/buying/summary"),
   getBuyingQuotes: (days = 90) =>
     request<{ items: BuyingQuote[] }>("GET", `/api/buying/quotes?days=${days}`),
+  getHeatingHours: (days = 400) =>
+    request<{ items: { date: string; hours: number; source: string }[] }>(
+      "GET",
+      `/api/buying/heating-hours?days=${days}`,
+    ),
   runBuying: () => request<BuyingSummary>("POST", "/api/buying/run", {}),
   calibrateBuying: () =>
     request<BuyingCalibration>("POST", "/api/buying/calibrate", {}),

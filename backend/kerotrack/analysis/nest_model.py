@@ -29,7 +29,8 @@ import calendar
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date
+import math
+from datetime import date, timedelta
 
 from kerotrack.analysis.daily_usage import MIN_DAYS_PER_MONTH, DayUsage
 
@@ -143,6 +144,34 @@ def expected_hours_fn(nest_hours: dict[str, float]) -> Callable[[date], float]:
         return mean / calendar.monthrange(d.year, d.month)[1]
 
     return expected
+
+
+def daily_heating_hours(
+    start: date, end: date, *, daily: dict[str, float], monthly: dict[str, float]
+) -> list[dict[str, object]]:
+    """One ``{"date", "hours", "source"}`` per day from ``start`` to ``end``.
+
+    Source order: a daily row (``daily``), else that month's total spread
+    evenly over its days (``monthly``), else the calendar month's mean
+    across every year (``average``, as the projection uses).
+    """
+    average = expected_hours_fn(monthly)
+    out: list[dict[str, object]] = []
+    d = start
+    while d <= end:
+        key = d.isoformat()
+        day_value = daily.get(key)
+        month_value = monthly.get(_month_key(d))
+        if day_value is not None and math.isfinite(day_value) and day_value >= 0:
+            hours, source = float(day_value), "daily"
+        elif month_value is not None:
+            hours = max(float(month_value), 0.0) / calendar.monthrange(d.year, d.month)[1]
+            source = "monthly"
+        else:
+            hours, source = average(d), "average"
+        out.append({"date": key, "hours": round(hours, 3), "source": source})
+        d += timedelta(days=1)
+    return out
 
 
 def nest_model_active(nest_hours: dict[str, float], a: float | None) -> bool:

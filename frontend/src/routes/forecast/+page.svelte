@@ -17,7 +17,7 @@
     settingNumber,
   } from "$lib/countdown";
   import { settings } from "$lib/stores/settings";
-  import { dailyMedians, usageTrend } from "$lib/usageTrend";
+  import { dailyStats, modelTrend } from "$lib/usageTrend";
   import type { AnalysisResult, BuyingSummary } from "$lib/types/api";
 
   type HistoryPoint = { date: string; litres: number };
@@ -105,11 +105,12 @@
     loading = true;
     // Each fetch stands alone: a failing usage endpoint must not hide the
     // runway, and a failing runway must not hide past usage.
-    const [latestR, histR, readingsR, buyingR] = await Promise.allSettled([
+    const [latestR, histR, readingsR, buyingR, hoursR] = await Promise.allSettled([
       api.analysisLatest(),
       api.analysisHistory(180),
       api.readings({ limit: 25000, order: "asc" }),
       api.getBuyingSummary(),
+      api.getHeatingHours(400),
     ]);
     today = isoToday();
 
@@ -146,13 +147,19 @@
       }
       history = series;
       // The trend uses every reading of the day (median), not just the
-      // first, so a single ghost echo at midnight cannot steer it.
-      trend = usageTrend(
-        dailyMedians(
+      // first, so a single ghost echo at midnight cannot steer it. Under
+      // the Nest model it follows expected use where the sensor glitches
+      // or sticks; otherwise (or without heating hours) the sensor alone.
+      const nest = buyingR.status === "fulfilled" && buyingR.value.heating_model === "nest";
+      trend = modelTrend(
+        dailyStats(
           (readingsR.value.items ?? []).filter(
             (r) => (r.date ?? "").slice(0, 10) >= cutoffStr,
           ),
         ),
+        nest && hoursR.status === "fulfilled" ? (hoursR.value.items ?? []) : [],
+        Number(summary?.hw_l_per_day ?? Number.NaN),
+        Number(summary?.l_per_heating_hour ?? Number.NaN),
       );
     }
 
@@ -269,9 +276,10 @@
         </span>
       </div>
       <p class="text-[11px] text-text-subtle">
-        Daily tank level over the last year. The dotted line is a trend that
-        ignores sensor glitches (phantom echoes and drop-outs). See the runway
-        above for order and reserve dates.
+        Daily tank level over the last year. The dotted line is the estimated
+        real level: it follows the sensor where the sensor is reliable, and
+        your expected use (hot water plus Nest heating hours) where the sensor
+        glitches or sticks. See the runway above for order and reserve dates.
       </p>
       <div class="rounded-lg border border-border bg-bg-panel p-3">
         <ForecastFan

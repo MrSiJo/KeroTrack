@@ -200,3 +200,12 @@ async def load_nest_monthly(sf: async_sessionmaker) -> dict[str, float]:
     async with sf() as session:
         rows = (await session.execute(select(NestHeatingMonthly))).scalars().all()
     return {r.month: float(r.heating_hours) for r in rows}
+
+
+async def load_nest_daily(sf: async_sessionmaker, since: str) -> dict[str, float]:
+    """``{"YYYY-MM-DD": heating_hours}`` for daily rows on or after ``since``."""
+    async with sf() as session:
+        rows = (
+            await session.execute(select(NestHeatingDaily).where(NestHeatingDaily.date >= since))
+        ).scalars().all()
+    return {r.date: float(r.heating_hours) for r in rows}
