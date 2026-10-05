@@ -26,6 +26,9 @@
 
 services:
   backend:
+    labels:
+      - wud.watch=false
+      - com.centurylinklabs.watchtower.enable=false
     image: ghcr.io/mrsijo/kerotrack-api:${KEROTRACK_TAG:-latest}
     container_name: kerotrack-api
     pull_policy: always
@@ -62,6 +65,9 @@ services:
       retries: 3
 
   frontend:
+    labels:
+      - wud.watch=false
+      - com.centurylinklabs.watchtower.enable=false
     image: ghcr.io/mrsijo/kerotrack-ui:${KEROTRACK_TAG:-latest}
     container_name: kerotrack-ui
     pull_policy: always
