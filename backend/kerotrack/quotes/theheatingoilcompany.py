@@ -56,8 +56,11 @@ class TheHeatingOilCompany:
                 ppl_net = float(ppl_m.group(1))
             except ValueError:
                 continue
+            # The headline card has no label of its own, only the site's
+            # "Best Price" banner; that is marketing, not a delivery window,
+            # and next to other suppliers it reads as KeroTrack's verdict.
             strong = card.find("strong")
-            label = strong.get_text(" ", strip=True) if strong else "Best Price"
+            label = strong.get_text(" ", strip=True) if strong else "Standard"
             delivery_by = _delivery_by(text)
             if (delivery_by, total) in seen:
                 continue

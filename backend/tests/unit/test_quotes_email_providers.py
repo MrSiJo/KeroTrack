@@ -56,6 +56,7 @@ def test_thoc_parse_happy_path() -> None:
     o = opts[0]
     assert o.total_inc_vat == 587.27 and o.ppl_net == 111.86
     assert o.delivery_by == "2026-10-20" and o.urgent is False
+    assert o.delivery_label == "Standard"  # not the site's "Best Price" banner
     assert o.fees_inc_vat == pytest.approx(0.0, abs=0.02)
 
 
