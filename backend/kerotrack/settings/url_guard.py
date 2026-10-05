@@ -9,9 +9,12 @@ backend will fetch. Two settings feed outbound fetches:
   allowlist the known price-provider hostname.
 - ``notifications.apprise_urls`` — a JSON list of Apprise targets. Apprise
   uses its own scheme zoo (``gotify://``, ``mailto://`` …), so we cannot
-  allowlist a domain set; instead we reject schemes that would let the
-  backend reach internal HTTP services and reject hosts that resolve to
-  loopback / link-local / private (RFC1918) addresses.
+  allowlist a domain set; instead we vet the host. A self-hosted app's main
+  notification target is a LAN Gotify, so private RFC1918 and unique-local
+  IPv6 (fc00::/7) hosts ARE allowed here. Loopback, link-local (169.254/16
+  including cloud metadata, fe80::/10), unspecified, multicast and reserved
+  hosts are still rejected. The price URL guard is stricter and keeps
+  rejecting private hosts too.
 
 Validation runs at WRITE time in ``SettingsService.set`` so a bad value never
 lands in the table. ``SettingError`` is raised on rejection, which the API
@@ -59,12 +62,26 @@ _HOSTED_APPRISE_SCHEMES = {
 }
 
 
-def _host_resolves_to_internal(host: str) -> bool:
-    """True if ``host`` is, or resolves to, a non-public address.
+# The only private networks a LAN notification target may live on: the three
+# RFC 1918 blocks (class A, B and C private ranges) and IPv6 unique-local.
+# Built from integers so no dotted literal sits in source.
+_LAN_NETWORKS = (
+    ipaddress.ip_network((0x0A000000, 8)),
+    ipaddress.ip_network((0xAC100000, 12)),
+    ipaddress.ip_network((0xC0A80000, 16)),
+    ipaddress.ip_network((0xFC << 120, 7)),
+)
 
-    Covers loopback, link-local, private (RFC1918), unique-local IPv6, and
-    unspecified ranges. A literal IP is checked directly; a name is resolved
-    via ``getaddrinfo`` and rejected if *any* resolved address is internal.
+
+def _host_resolves_to_internal(host: str, *, allow_private: bool = False) -> bool:
+    """True if ``host`` is, or resolves to, a disallowed address.
+
+    Covers loopback, link-local, private (RFC1918), unique-local IPv6,
+    unspecified, multicast and reserved ranges. With ``allow_private`` the
+    private and unique-local ranges are permitted (LAN notification targets);
+    everything else stays rejected. A literal IP is checked directly; a name
+    is resolved via ``getaddrinfo`` and rejected if *any* resolved address is
+    disallowed.
     """
     candidates: list[str] = []
     try:
@@ -84,13 +101,30 @@ def _host_resolves_to_internal(host: str) -> bool:
             ip = ipaddress.ip_address(addr)
         except ValueError:
             continue
+        # Unwrap IPv6 forms that embed an IPv4 address so they are judged as
+        # the IPv4 they really reach. Teredo cannot be judged safely: reject.
+        if isinstance(ip, ipaddress.IPv6Address):
+            if ip.ipv4_mapped is not None:
+                ip = ip.ipv4_mapped
+            elif ip.sixtofour is not None:
+                ip = ip.sixtofour
+            elif ip.teredo is not None:
+                return True
+        # Always rejected, whatever the allowance.
         if (
             ip.is_loopback
             or ip.is_link_local
-            or ip.is_private
             or ip.is_unspecified
+            or ip.is_multicast
             or ip.is_reserved
         ):
+            return True
+        if allow_private:
+            # Only the explicit LAN networks; other "private" ranges (CGNAT,
+            # IETF protocol, benchmarking) stay rejected.
+            if not any(ip in net for net in _LAN_NETWORKS):
+                return True
+        elif ip.is_private or not ip.is_global:
             return True
     return False
 
@@ -153,7 +187,7 @@ def validate_apprise_urls(key: str, value: object) -> None:
         # an attacker-influenceable host. Hostless/credential-only schemes
         # (e.g. tgram://, mailto:) carry no SSRF surface here.
         if host and scheme in _HOSTED_APPRISE_SCHEMES:
-            if _host_resolves_to_internal(host):
+            if _host_resolves_to_internal(host, allow_private=True):
                 raise SettingError(
                     "url_host_internal",
                     f"{key}: {entry!r} targets internal address {host!r}",

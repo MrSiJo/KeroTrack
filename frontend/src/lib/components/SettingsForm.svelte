@@ -10,9 +10,11 @@
 
   type Props = {
     pending: Record<string, unknown>;
+    fieldErrors?: Record<string, string>;
+    onReset?: () => void;
     onChange: (key: string, value: unknown) => void;
   };
-  let { pending, onChange }: Props = $props();
+  let { pending, fieldErrors = {}, onReset, onChange }: Props = $props();
 
   let oldPassword = $state("");
   let newPassword = $state("");
@@ -125,6 +127,7 @@
         await api.resetSetting(item.key);
       }
       await settings.refresh();
+      onReset?.();
     } catch (err) {
       console.error("reset failed", err);
     } finally {
@@ -248,7 +251,7 @@
               <textarea
                 class="w-full rounded border border-border bg-bg-elev px-2 py-1 font-mono text-xs"
                 rows="3"
-                placeholder="One URL per line — e.g. gotify://gotify.lan/AbC123"
+                placeholder="One URL per line, e.g. gotify://gotify.lan/AbC123"
                 oninput={(e) => {
                   const raw = (e.currentTarget as HTMLTextAreaElement).value;
                   const arr = raw.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
@@ -335,6 +338,9 @@
                 value={display(item) as string}
                 oninput={(e) => onChange(item.key, (e.currentTarget as HTMLInputElement).value)}
               />
+            {/if}
+            {#if fieldErrors[item.key]}
+              <p class="mt-1 text-xs text-brand-red" role="alert">{fieldErrors[item.key]}</p>
             {/if}
           </div>
         </div>

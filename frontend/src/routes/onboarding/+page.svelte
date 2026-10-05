@@ -3,7 +3,7 @@
   import { goto } from "$app/navigation";
 
   import { api, ApiError } from "$lib/api";
-  import { settings } from "$lib/stores/settings";
+  import { formatSaveErrors, settings } from "$lib/stores/settings";
   import { get } from "svelte/store";
 
   let step = $state(1);
@@ -138,7 +138,19 @@
     if (mqttPassword) diff["mqtt.password"] = mqttPassword;
     try {
       if (Object.keys(diff).length > 0) {
-        await api.bulkSetSettings(diff);
+        const res = await api.bulkSetSettings(diff);
+        if (res.errors && res.errors.length > 0) {
+          // The endpoint answers 200 even when keys are rejected.
+          const schema = get(settings).schema;
+          error = formatSaveErrors(
+            res.errors.map((e) => ({
+              key: e.key,
+              label: schema.find((d) => d.key === e.key)?.label ?? e.key,
+              message: e.message,
+            })),
+          );
+          return;
+        }
       }
       if (typeof localStorage !== "undefined") {
         localStorage.setItem("kerotrack.onboarding.dismissed", "1");

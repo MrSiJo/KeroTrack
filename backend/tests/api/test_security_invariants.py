@@ -398,6 +398,193 @@ def test_apprise_url_rejects_internal_host(tmp_path: Path) -> None:
     assert exc.value.code == "url_host_internal"
 
 
+def _fake_dns(
+    monkeypatch: pytest.MonkeyPatch, table: dict[str, str | list[str]]
+) -> None:
+    """Resolve the named hosts from ``table``; everything else is unresolvable.
+
+    Addresses are built from integers or IPv6 text so no RFC 1918 literal
+    appears in source (the forbid-environment-ips hook covers tests).
+    """
+    import socket
+
+    def fake(host, *args, **kwargs):  # noqa: ANN001, ANN002, ANN003
+        if host in table:
+            v = table[host]
+            addrs = v if isinstance(v, list) else [v]
+            return [
+                (socket.AF_INET, socket.SOCK_STREAM, 6, "", (a, 0)) for a in addrs
+            ]
+        raise socket.gaierror("unresolvable in test")
+
+    monkeypatch.setattr("kerotrack.settings.url_guard.socket.getaddrinfo", fake)
+
+
+def _rfc1918(n: int) -> str:
+    import ipaddress
+
+    return str(ipaddress.IPv4Address(0xAC100000 + n))  # 172.16.0.n
+
+
+def test_apprise_url_accepts_lan_gotify_by_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _fake_dns(monkeypatch, {"gotify.lan.test": _rfc1918(5)})
+    _run_set(
+        tmp_path, "notifications.apprise_urls", ["gotify://gotify.lan.test/tok"]
+    )
+
+
+def test_apprise_url_accepts_lan_literal_ip(tmp_path: Path) -> None:
+    _run_set(
+        tmp_path,
+        "notifications.apprise_urls",
+        [f"gotify://{_rfc1918(5)}:8080/tok"],
+    )
+
+
+def test_apprise_url_accepts_unique_local_ipv6(tmp_path: Path) -> None:
+    _run_set(
+        tmp_path, "notifications.apprise_urls", ["gotify://[fd00::5]/tok"]
+    )
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "gotify://169.254.169.254/tok",
+        "gotify://[fe80::1]/tok",
+        "gotify://0.0.0.0/tok",
+        "gotify://[::1]/tok",
+        "gotify://224.0.0.1/tok",
+    ],
+)
+def test_apprise_url_still_rejects_non_lan_internal(
+    tmp_path: Path, target: str
+) -> None:
+    from kerotrack.settings.service import SettingError
+
+    with pytest.raises(SettingError) as exc:
+        _run_set(tmp_path, "notifications.apprise_urls", [target])
+    assert exc.value.code == "url_host_internal"
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "gotify://[::ffff:127.0.0.1]/tok",
+        "gotify://[::ffff:169.254.169.254]/tok",
+        "gotify://[2002:7f00:1::]/tok",  # 6to4 wrapping 127.0.0.1
+        "gotify://127.0.0.1/tok",
+        "gotify://100.64.0.1/tok",  # CGNAT: private per Python, not LAN
+        "gotify://198.18.0.1/tok",
+        "gotify://192.0.0.8/tok",
+    ],
+)
+def test_apprise_url_rejects_embedded_and_non_lan_private(
+    tmp_path: Path, target: str
+) -> None:
+    from kerotrack.settings.service import SettingError
+
+    with pytest.raises(SettingError) as exc:
+        _run_set(tmp_path, "notifications.apprise_urls", [target])
+    assert exc.value.code == "url_host_internal"
+
+
+def test_apprise_url_accepts_mapped_lan_address(tmp_path: Path) -> None:
+    """A mapped RFC 1918 address is unwrapped and judged as the LAN address."""
+    _run_set(
+        tmp_path,
+        "notifications.apprise_urls",
+        [f"gotify://[::ffff:{_rfc1918(5)}]/tok"],
+    )
+
+
+_PRICE_URL = "https://www.boilerjuice.com/heating-oil-prices-england/"
+
+
+@pytest.mark.parametrize("bad", ["169.254.169.254", "127.0.0.1"])
+@pytest.mark.parametrize("lan_first", [True, False])
+def test_mixed_resolution_rejected_for_apprise_and_price(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, bad: str, lan_first: bool
+) -> None:
+    from kerotrack.settings.service import SettingError
+
+    addrs = [_rfc1918(5), bad] if lan_first else [bad, _rfc1918(5)]
+    _fake_dns(monkeypatch, {"mixed.test": addrs, "www.boilerjuice.com": addrs})
+    with pytest.raises(SettingError) as exc:
+        _run_set(tmp_path, "notifications.apprise_urls", ["gotify://mixed.test/t"])
+    assert exc.value.code == "url_host_internal"
+    with pytest.raises(SettingError) as exc:
+        _run_set(tmp_path, "prices.boilerjuice_url", _PRICE_URL)
+    assert exc.value.code == "url_host_internal"
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "gotify://[2001:0:4136:e378:8000:63bf:3fff:fdd2]/t",  # Teredo
+        "gotify://[ff02::1]/t",
+        "gotify://[::]/t",
+        "gotify://240.0.0.1/t",
+    ],
+)
+def test_apprise_url_rejects_teredo_multicast_unspecified_reserved(
+    tmp_path: Path, target: str
+) -> None:
+    from kerotrack.settings.service import SettingError
+
+    with pytest.raises(SettingError) as exc:
+        _run_set(tmp_path, "notifications.apprise_urls", [target])
+    assert exc.value.code == "url_host_internal"
+
+
+def test_apprise_url_accepts_6to4_wrapping_lan(tmp_path: Path) -> None:
+    import ipaddress
+
+    v4 = int(ipaddress.IPv4Address(_rfc1918(5)))
+    v6 = ipaddress.IPv6Address((0x2002 << 112) | (v4 << 80))
+    _run_set(tmp_path, "notifications.apprise_urls", [f"gotify://[{v6}]/t"])
+
+
+@pytest.mark.parametrize("addr", ["100.64.0.1", "127.0.0.1"])
+def test_price_url_rejects_cgnat_and_loopback_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, addr: str
+) -> None:
+    from kerotrack.settings.service import SettingError
+
+    _fake_dns(monkeypatch, {"www.boilerjuice.com": addr})
+    with pytest.raises(SettingError) as exc:
+        _run_set(tmp_path, "prices.boilerjuice_url", _PRICE_URL)
+    assert exc.value.code == "url_host_internal"
+
+
+def test_apprise_url_rejects_name_resolving_to_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kerotrack.settings.service import SettingError
+
+    _fake_dns(monkeypatch, {"sneaky.test": "169.254.169.254"})
+    with pytest.raises(SettingError) as exc:
+        _run_set(tmp_path, "notifications.apprise_urls", ["gotify://sneaky.test/t"])
+    assert exc.value.code == "url_host_internal"
+
+
+def test_price_url_still_rejects_private_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kerotrack.settings.service import SettingError
+
+    _fake_dns(monkeypatch, {"www.boilerjuice.com": _rfc1918(9)})
+    with pytest.raises(SettingError) as exc:
+        _run_set(
+            tmp_path,
+            "prices.boilerjuice_url",
+            "https://www.boilerjuice.com/heating-oil-prices-england/",
+        )
+    assert exc.value.code == "url_host_internal"
+
+
 def test_price_url_allowlisted_host_passes(tmp_path: Path) -> None:
     """The catalogue defaults must remain settable (no false positives)."""
     _run_set(

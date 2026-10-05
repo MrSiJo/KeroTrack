@@ -3,12 +3,13 @@
   import SettingsForm from "$lib/components/SettingsForm.svelte";
   import SettingsNav from "$lib/components/SettingsNav.svelte";
   import { ApiError } from "$lib/api";
-  import { settings } from "$lib/stores/settings";
+  import { formatSaveErrors, settings } from "$lib/stores/settings";
 
   let pending = $state<Record<string, unknown>>({});
   let saving = $state(false);
   let saveError = $state<string | null>(null);
   let saveOk = $state(false);
+  let fieldErrors = $state<Record<string, string>>({});
 
   onMount(() => {
     void settings.refresh();
@@ -17,16 +18,32 @@
   function setPending(key: string, value: unknown) {
     pending = { ...pending, [key]: value };
     saveOk = false;
+    if (fieldErrors[key]) {
+      const { [key]: _gone, ...rest } = fieldErrors;
+      fieldErrors = rest;
+    }
   }
 
   async function save() {
     if (!Object.keys(pending).length) return;
     saving = true;
     saveError = null;
+    saveOk = false;
     try {
-      await settings.save(pending);
-      pending = {};
-      saveOk = true;
+      const result = await settings.save(pending);
+      // Saved keys are no longer pending; failed keys stay for another go.
+      const failed = new Set(result.errors.map((e) => e.key));
+      pending = Object.fromEntries(
+        Object.entries(pending).filter(([k]) => failed.has(k)),
+      );
+      fieldErrors = Object.fromEntries(
+        result.errors.map((e) => [e.key, e.message]),
+      );
+      if (result.ok) {
+        saveOk = true;
+      } else {
+        saveError = formatSaveErrors(result.errors);
+      }
     } catch (err) {
       saveError = err instanceof ApiError ? err.message : (err as Error).message;
     } finally {
@@ -57,6 +74,6 @@
 
   <div class="flex items-start gap-4">
     <SettingsNav />
-    <SettingsForm {pending} onChange={setPending} />
+    <SettingsForm {pending} {fieldErrors} onReset={() => (fieldErrors = {})} onChange={setPending} />
   </div>
 </div>
