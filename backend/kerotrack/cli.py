@@ -340,6 +340,30 @@ async def _import_ons_prices(args: argparse.Namespace) -> int:
     return await _with_session(_do)
 
 
+async def _import_nest_months(args: argparse.Namespace) -> int:
+    """Back-fill ``nest_heating_monthly`` from a ``month,heating_hours,source``
+    CSV. Prints the row count only, never the figures."""
+    import csv
+
+    from kerotrack.ingest import nest
+
+    try:
+        rows = nest.parse_nest_months_csv(Path(args.csv))
+    except (OSError, ValueError) as exc:
+        print(f"import-nest-months: {exc}", file=sys.stderr)
+        return 2
+    except csv.Error:
+        print("import-nest-months: the file is not a readable CSV", file=sys.stderr)
+        return 2
+
+    async def _do(sf):
+        imported, skipped = await nest.import_nest_months(sf, rows)
+        print(json.dumps({"imported": imported, "skipped_duplicates": skipped}))
+        return 0
+
+    return await _with_session(_do)
+
+
 async def _reset_noise_flags(args: argparse.Namespace) -> int:
     """Reset refill/leak flags on rows where the inter-reading delta
     exceeds the live sanity bound (Watchman Sonic multipath misreads)."""
@@ -522,6 +546,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--csv", required=True, help="Path to series-XXXXX.csv from ONS"
     )
     ons.set_defaults(func=_import_ons_prices)
+
+    nest = sub.add_parser(
+        "import-nest-months",
+        help="Import monthly Nest heating hours from a month,heating_hours,source CSV",
+    )
+    nest.add_argument("csv", help="Path to the CSV (source is report, prev or daily)")
+    nest.set_defaults(func=_import_nest_months)
 
     reset_noise = sub.add_parser(
         "reset-noise-flags",

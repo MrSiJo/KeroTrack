@@ -38,6 +38,18 @@ class Calibration:
     days_used: int
     heating_days: int
     hw_floor_l: float | None = None  # summer floor hot water, used when the free intercept is <= 0
+    # Nest heating hours model (analysis.nest_model). heating_model is "nest"
+    # when the projection uses it, else "hdd". l_per_heating_hour is the
+    # fixed hot water fit (what the projection uses); hw_per_day_nest and
+    # l_per_heating_hour_free are the free fit, used only for the burner
+    # minutes proposal (under "nest" proposed_burner_minutes comes from
+    # hw_per_day_nest). All are reported whenever the fit succeeded.
+    heating_model: str = "hdd"
+    l_per_heating_hour: float | None = None
+    nest_months_used: int = 0
+    hw_per_day_nest: float | None = None
+    l_per_heating_hour_free: float | None = None
+    nest_months_excluded: int = 0
 
 
 def bucket_daily(

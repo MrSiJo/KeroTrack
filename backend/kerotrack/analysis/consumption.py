@@ -16,7 +16,9 @@ This is the v1 algorithm restored (backlog A1):
    spikes greater than `detection.refill_threshold_l`).
 4. Heating estimate = ``k × today's HDD`` (0 when HDD is 0), with ``k``
    from the projection service's calibration (spec A5);
-   ``heating_estimate_basis`` = ``"model"``. Only when the projection
+   ``heating_estimate_basis`` = ``"model"``. Under the Nest heating hours
+   model it is ``a × expected heating hours today`` with basis ``"nest"``
+   (spec 2026-10-05-nest-heating-model). Only when the projection
    cannot run does the legacy estimate apply (``"legacy"``): 7-day vs
    long-window blend (0.65/0.35), scaled by `today_HDD/avg_7d_HDD` clamped
    0.6-1.6, then clamped to [MIN_HEATING_L, MAX_HEATING_L].
@@ -30,8 +32,8 @@ This is the v1 algorithm restored (backlog A1):
    is the flat rate capped at 400 (HDD>0) or 700 (HDD=0).
 
 Output shape: every key in spec §3.2 is still present with the same types
-and rounding, plus one added key, ``heating_estimate_basis`` (``"model"`` or
-``"legacy"``, see point 4).
+and rounding, plus one added key, ``heating_estimate_basis`` (``"model"``,
+``"nest"`` or ``"legacy"``, see point 4).
 """
 
 from __future__ import annotations
@@ -552,7 +554,16 @@ async def compute(
 
     factor = _seasonal_heating_factor(next_month)
 
-    if bundle is not None:
+    if (
+        bundle is not None
+        and bundle.heating_model == "nest"
+        and bundle.l_per_heating_hour is not None
+        and bundle.expected_heating_hours is not None
+    ):
+        # Nest model: litres per heating hour × expected heating hours today.
+        heating_estimate_basis = "nest"
+        heating_l = bundle.l_per_heating_hour * bundle.expected_heating_hours(latest_dt.date())
+    elif bundle is not None:
         # Spec A5: k × today's HDD, zero on a no-heating day.
         heating_estimate_basis = "model"
         heating_l = bundle.k * today_hdd if today_hdd > 0 else 0.0

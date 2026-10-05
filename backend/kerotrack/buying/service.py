@@ -286,6 +286,9 @@ async def run_buying(
             row.state = state
             row.updated_at = now_str
             row.summary_json = json.dumps(payload)
+            if bundle is not None:
+                row.heating_model = bundle.heating_model
+                row.l_per_heating_hour = bundle.l_per_heating_hour
             # "unknown" is usually a transient failure (no fresh data), so
             # it keeps the memory: the next good run must not re-alert.
             if state not in ALERT_STATES and state != "unknown":
@@ -450,6 +453,15 @@ async def build_summary(sf: async_sessionmaker, svc: SettingsService, *, now: da
         "active_scenario": active,
         "k": projections[0].k if projections else None,
         "hw_l_per_day": projections[0].hw_l_per_day if projections else None,
+        "heating_model": (
+            state_row.heating_model if state_row is not None and state_row.heating_model else "hdd"
+        ),
+        "l_per_heating_hour": _round(
+            state_row.l_per_heating_hour
+            if state_row is not None and state_row.heating_model == "nest"
+            else None,
+            3,
+        ),
         "context": {
             "index_percentile_365d": await _index_percentile(
                 sf, _index_ppl(await _latest_index(sf)), now

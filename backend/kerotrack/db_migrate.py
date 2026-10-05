@@ -33,11 +33,14 @@ from kerotrack.models import monthly_ppl as _mppl  # noqa: F401
 from kerotrack.models import runway_projection as _rwp  # noqa: F401
 from kerotrack.models import price_quote as _pq  # noqa: F401
 from kerotrack.models import buying_state as _bs  # noqa: F401
+from kerotrack.models import nest_heating_daily as _nhd  # noqa: F401
+from kerotrack.models import nest_heating_monthly as _nhm  # noqa: F401
 
 
 _COLUMN_ADDITIONS: dict[str, dict[str, str]] = {
     "analysis_results": {"heating_estimate_basis": "TEXT"},
     "cost_analysis": {"days_since_period_end": "INTEGER"},
+    "buying_state": {"heating_model": "TEXT", "l_per_heating_hour": "REAL"},
 }
 _ALLOWED_TYPES = {"TEXT", "INTEGER", "REAL", "FLOAT"}
 

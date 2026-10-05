@@ -67,6 +67,8 @@ def test_summary_empty_db_200(app_client) -> None:
     resp = c.get("/api/buying/summary")
     assert resp.status_code == 200
     assert resp.json()["state"] == "unknown"
+    assert resp.json()["heating_model"] == "hdd"
+    assert resp.json()["l_per_heating_hour"] is None
 
 
 def test_summary_with_state(app_client) -> None:
@@ -137,6 +139,12 @@ def test_calibrate_returns_k(app_client) -> None:
     assert "k" in body
     assert "current_burner_minutes" in body
     assert "current_hw_l_per_day" in body
+    assert body["heating_model"] == "hdd"
+    assert body["l_per_heating_hour"] is None
+    assert body["nest_months_used"] == 0
+    assert body["hw_per_day_nest"] is None
+    assert body["l_per_heating_hour_free"] is None
+    assert body["nest_months_excluded"] == 0
 
 
 def test_run_returns_summary(app_client) -> None:

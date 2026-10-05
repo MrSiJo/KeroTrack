@@ -220,3 +220,146 @@ async def test_after_order_level_is_capped_at_safe_fill(
         nexts.append(bundle.outcomes["normal"].next_order_by)
     # Both orders overflow the cap, so both refill to the same level.
     assert nexts[0] is not None and nexts[0] == nexts[1]
+
+
+# ----- Nest heating hours model (synthetic) --------------------------------
+
+NEST_A = 0.7
+NEST_HOURS = {1: 70.0, 2: 50.0, 3: 40.0, 4: 20.0, 5: 4.0, 6: 0.0, 7: 0.0, 8: 0.0,
+              9: 0.0, 10: 6.0, 11: 30.0, 12: 45.0}
+
+
+def _nest_heating(d: date) -> float:
+    import calendar
+
+    return NEST_A * NEST_HOURS[d.month] / calendar.monthrange(d.year, d.month)[1]
+
+
+async def _seed_nest(
+    sf: async_sessionmaker, svc, now: datetime, *, months: int, n_days: int = 400
+) -> None:
+    """``n_days`` of readings drawn as hot water + a * hours/day, plus
+    ``months`` of Nest monthly hours ending with the current month."""
+    from kerotrack.ingest.nest import import_nest_months
+
+    schedule, minutes, rate = await load_hw(svc)
+    hw = {wd: hw_litres_for_weekday(schedule, wd, minutes, rate) for wd in range(7)}
+    today = now.date()
+    days = [today - timedelta(days=n_days - 1 - i) for i in range(n_days)]
+    draws = [hw[d.weekday()] + _nest_heating(d) for d in days[1:]]
+    level = 600.0 + sum(draws)
+    async with sf() as session:
+        session.add(_reading(datetime(days[0].year, days[0].month, days[0].day, 12), level))
+        for d, draw in zip(days[1:], draws):
+            level -= draw
+            session.add(_reading(datetime(d.year, d.month, d.day, 12), level))
+        await session.commit()
+    rows = []
+    y, m = today.year, today.month
+    for _ in range(months):
+        rows.append((f"{y:04d}-{m:02d}", NEST_HOURS[m], "report"))
+        y, m = (y - 1, 12) if m == 1 else (y, m - 1)
+    await import_nest_months(sf, rows)
+
+
+async def test_nest_model_active_with_twelve_months(sf: async_sessionmaker, seeded_settings) -> None:
+    now = datetime(2026, 10, 4, 18, 0)
+    await _seed_nest(sf, seeded_settings, now, months=24)
+
+    bundle = await project(sf, seeded_settings, now=now)
+
+    assert bundle is not None
+    assert bundle.heating_model == "nest"
+    assert bundle.l_per_heating_hour == pytest.approx(NEST_A, abs=0.02)
+    cal = bundle.calibration
+    assert cal.heating_model == "nest"
+    assert cal.l_per_heating_hour == pytest.approx(NEST_A, abs=0.02)
+    assert cal.hw_per_day_nest == pytest.approx(bundle.hw_l_per_day, abs=0.05)
+    assert cal.nest_months_used >= 12
+    assert cal.nest_months_excluded == 0
+    assert cal.l_per_heating_hour_free == pytest.approx(NEST_A, abs=0.02)
+    assert cal.proposed_burner_minutes is not None
+    # The heating term is a * expected hours; today is in October.
+    expected_hours = bundle.expected_heating_hours(now.date())
+    assert expected_hours == pytest.approx(6.0 / 31)
+    normal = bundle.outcomes["normal"]
+    first_draw = normal.series[0][1] - normal.series[1][1]
+    assert first_draw == pytest.approx(
+        bundle.hw_by_weekday[now.date().weekday()] + bundle.l_per_heating_hour * 6.0 / 31,
+        abs=1e-6,
+    )
+    # Cold scenario multiplies the Nest heating term, so it orders earlier.
+    assert bundle.outcomes["cold"].order_by < normal.order_by
+    # The HDD k is still what gets persisted (no HDD here, so the default).
+    assert bundle.k == DEFAULT_K
+
+
+async def test_nest_model_needs_twelve_months(sf: async_sessionmaker, seeded_settings) -> None:
+    now = datetime(2026, 10, 4, 18, 0)
+    await _seed_nest(sf, seeded_settings, now, months=11)
+
+    bundle = await project(sf, seeded_settings, now=now)
+
+    assert bundle is not None
+    assert bundle.heating_model == "hdd"
+    assert bundle.l_per_heating_hour is None
+    assert bundle.expected_heating_hours is None
+    assert bundle.calibration.heating_model == "hdd"
+    # Nest months Dec 2025 to Oct 2026 overlap usage months up to Sep 2026.
+    assert bundle.calibration.nest_months_used == 10
+
+
+async def test_no_nest_data_keeps_hdd_model(sf: async_sessionmaker, seeded_settings) -> None:
+    now = datetime(2026, 10, 4, 18, 0)
+    await _seed_winter(sf, seeded_settings, now)
+    bundle = await project(sf, seeded_settings, now=now)
+    assert bundle is not None
+    assert bundle.heating_model == "hdd"
+    assert bundle.calibration.heating_model == "hdd"
+    assert bundle.calibration.l_per_heating_hour is None
+    assert bundle.calibration.nest_months_used == 0
+    assert bundle.calibration.hw_per_day_nest is None
+
+
+async def test_nest_calibration_uses_730_days(sf: async_sessionmaker, seeded_settings) -> None:
+    from kerotrack.projection.service import NEST_CALIBRATION_WINDOW_DAYS
+
+    assert NEST_CALIBRATION_WINDOW_DAYS == 730
+    now = datetime(2026, 10, 4, 18, 0)
+    await _seed_nest(sf, seeded_settings, now, months=30, n_days=760)
+    bundle = await project(sf, seeded_settings, now=now)
+    assert bundle is not None
+    # About 24 months of usable readings, far beyond the 400 day HDD window.
+    assert bundle.calibration.nest_months_used >= 22
+    assert bundle.heating_model == "nest"
+    assert bundle.l_per_heating_hour == pytest.approx(NEST_A, abs=0.02)
+    # The HDD fit still only looks at 400 days.
+    assert bundle.calibration.days_used <= 400
+
+
+async def test_sensor_blind_months_reported(sf: async_sessionmaker, seeded_settings) -> None:
+    now = datetime(2026, 10, 4, 18, 0)
+    await _seed_nest(sf, seeded_settings, now, months=24)
+    # Flatten the readings for June and July 2026: the sensor saw nothing.
+    async with sf() as session:
+        await session.execute(
+            update(Reading)
+            .where(Reading.date >= "2026-06-01", Reading.date < "2026-08-01")
+            .values(litres_remaining=None)
+        )
+        await session.commit()
+    async with sf() as session:
+        rows = (
+            await session.execute(
+                select(Reading).where(Reading.date >= "2026-05-31", Reading.date < "2026-08-01")
+                .order_by(Reading.date)
+            )
+        ).scalars().all()
+        level = rows[0].litres_remaining
+        for r in rows[1:]:
+            r.litres_remaining = level  # perfectly flat: 0 L/day
+        await session.commit()
+    bundle = await project(sf, seeded_settings, now=now)
+    assert bundle is not None
+    assert bundle.calibration.nest_months_excluded == 2
+    assert bundle.l_per_heating_hour == pytest.approx(NEST_A, abs=0.02)

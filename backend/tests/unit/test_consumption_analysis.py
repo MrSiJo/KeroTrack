@@ -609,3 +609,21 @@ async def test_projection_failure_falls_back_to_legacy(
     assert payload["estimated_days_remaining"] == pytest.approx(403.0 / 1.83, abs=1.0)
     expected = latest + timedelta(days=payload["estimated_days_remaining"])
     assert payload["estimated_empty_date"][:10] == expected.strftime("%Y-%m-%d")
+
+
+async def test_heating_estimate_uses_nest_model_when_active(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    from tests.unit.test_projection_service import _seed_nest
+
+    now = datetime(2026, 10, 4, 12, 0)
+    await _seed_nest(sf, seeded_settings, now, months=24)
+    payload = await compute(sf, seeded_settings)
+    assert payload is not None
+    assert payload["heating_estimate_basis"] == "nest"
+    bundle = await project(sf, seeded_settings, now=now)
+    assert bundle is not None and bundle.heating_model == "nest"
+    # a * expected hours today: October's synthetic 6 h over 31 days.
+    assert payload["estimated_daily_heating_consumption_l"] == pytest.approx(
+        round(bundle.l_per_heating_hour * 6.0 / 31, 2)
+    )

@@ -67,3 +67,14 @@ def test_simulate_365_days_with_climatology_is_fast():
     t = time.perf_counter()
     simulate(RunwayInputs(date(2026, 10, 4), 900.0, 0.2, FLAT_HW, f, {}, 100.0, 365))
     assert time.perf_counter() - t < 0.5
+
+
+def test_heating_litres_function_replaces_k_times_hdd():
+    # Nest model: heating litres per day come from a * expected_hours(d);
+    # k and expected_hdd are ignored, the multiplier still applies.
+    inp = RunwayInputs(
+        date(2026, 11, 1), 1000.0, 99.0, FLAT_HW, lambda d: 50.0, {11: 0.5}, 0.0, 10,
+        heating_l=lambda d: 4.0,
+    )
+    r = simulate(inp)
+    assert 1000.0 - r.series[1][1] == pytest.approx(1.0 + 4.0 * 0.5)

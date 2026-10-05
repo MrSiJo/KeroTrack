@@ -317,6 +317,14 @@ def _entries() -> list[SettingDef]:
             "Topic the buy planner publishes its recommendation to.",
         ),
         SettingDef(
+            "mqtt.topic_nest_heating",
+            "string",
+            "mqtt",
+            "Nest heating hours topic (subscribe)",
+            "kerotrack/nest_heating",
+            "Daily Nest heating hours published by Home Assistant.",
+        ),
+        SettingDef(
             "mqtt.timeout_minutes",
             "int",
             "mqtt",

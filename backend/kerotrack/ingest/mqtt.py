@@ -4,6 +4,9 @@ Subscribes to the `mqtt.topic_readings` configured topic, normalises the
 incoming Watchman Sonic Advanced JSON, runs `recalc.process()`, persists the
 resulting row in `readings`, and publishes the v1-compatible payload via
 `MqttPublisher` plus a pubsub fan-out for SSE consumers.
+
+Also subscribes to `mqtt.topic_nest_heating` (daily Nest heating hours from
+Home Assistant), routed to `ingest.nest`.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ import aiomqtt
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
+from kerotrack.ingest.nest import handle_nest_payload
 from kerotrack.ingest.raw_capture import persist_raw_capture
 from kerotrack.ingest.recalc import (
     PreviousReading,
@@ -257,6 +261,7 @@ class MqttIngest:
         self.connected = False
         self._adapter = _AiomqttPublisherAdapter()
         self.publisher = self._build_publisher()
+        self._nest_topic: str | None = None
 
     def _build_publisher(self) -> MqttPublisher:
         # Topic strings come from settings at run time inside the loop, but
@@ -277,6 +282,22 @@ class MqttIngest:
             topic_buying=topic_buying,
         )
 
+    async def _subscribe_topics(self) -> list[str]:
+        """Readings topic first, then the Nest heating topic when set."""
+        readings = str(await self._settings.get("mqtt.topic_readings"))
+        topics = [readings]
+        nest = str(await self._settings.get("mqtt.topic_nest_heating") or "").strip()
+        if nest and nest == readings.strip():
+            # Routing would send every tank reading to the Nest handler.
+            logger.warning(
+                "mqtt.topic_nest_heating equals mqtt.topic_readings; ignoring the Nest topic"
+            )
+            nest = ""
+        self._nest_topic = nest or None
+        if nest:
+            topics.append(nest)
+        return topics
+
     def stop(self) -> None:
         self._stop.set()
         self._reload.set()
@@ -294,7 +315,7 @@ class MqttIngest:
                 port = int(await self._settings.get("mqtt.port"))
                 username = str(await self._settings.get("mqtt.username")) or None
                 password = str(await self._settings.get("mqtt.password")) or None
-                subscribe_topic = str(await self._settings.get("mqtt.topic_readings"))
+                subscribe_topics = await self._subscribe_topics()
             except Exception as exc:  # noqa: BLE001
                 logger.exception("failed to load mqtt settings: %s", exc)
                 await asyncio.sleep(5)
@@ -314,7 +335,7 @@ class MqttIngest:
             await self._refresh_publisher_topics()
             logger.info(
                 "MQTT connecting to %s:%s as %s, subscribing %s",
-                broker, port, username, subscribe_topic,
+                broker, port, username, ", ".join(subscribe_topics),
             )
             try:
                 async with aiomqtt.Client(
@@ -327,7 +348,8 @@ class MqttIngest:
                     self._adapter.bind(client)
                     self.connected = True
                     backoff = 1.0
-                    await client.subscribe(subscribe_topic, qos=0)
+                    for topic in subscribe_topics:
+                        await client.subscribe(topic, qos=0)
 
                     consumer = asyncio.create_task(self._consume(client))
                     waiter = asyncio.create_task(self._reload.wait())
@@ -357,6 +379,31 @@ class MqttIngest:
 
         logger.info("MQTT ingest loop stopped")
 
+    def _is_nest_topic(self, topic: str) -> bool:
+        return bool(self._nest_topic) and aiomqtt.Topic(topic).matches(self._nest_topic)
+
+    async def _dispatch(self, topic: str, raw: Any) -> None:
+        """Route one decoded message by topic."""
+        if self._is_nest_topic(topic):
+            await handle_nest_payload(raw, sf=self._sf)
+            return
+
+        # Only RTL_433 Watchman Sonic payloads carry the depth_cm/temperature_C
+        # we expect. Skip anything else (e.g. our own publishes echoed back
+        # if subscribed to a wildcard).
+        if not isinstance(raw, dict) or "depth_cm" not in raw or "temperature_C" not in raw:
+            return
+
+        await handle_payload(
+            raw,
+            sf=self._sf,
+            settings_service=self._settings,
+            publisher=self.publisher,
+            pubsub=self._pubsub,
+            price_provider=self._price_provider,
+            topic=topic,
+        )
+
     async def _consume(self, client: aiomqtt.Client) -> None:
         async for msg in client.messages:
             try:
@@ -364,26 +411,15 @@ class MqttIngest:
                 try:
                     raw = json.loads(body)
                 except json.JSONDecodeError:
-                    logger.debug("Non-JSON MQTT payload on %s: %r", msg.topic, body[:200])
+                    if self._is_nest_topic(str(msg.topic)):
+                        logger.warning("nest heating: non-JSON payload dropped")
+                    else:
+                        logger.debug("Non-JSON MQTT payload on %s: %r", msg.topic, body[:200])
                     continue
 
                 if self._feed is not None:
                     self._feed.append(topic=str(msg.topic), payload=raw)
 
-                # Only RTL_433 Watchman Sonic payloads carry the depth_cm/temperature_C
-                # we expect. Skip anything else (e.g. our own publishes echoed back
-                # if subscribed to a wildcard).
-                if "depth_cm" not in raw or "temperature_C" not in raw:
-                    continue
-
-                await handle_payload(
-                    raw,
-                    sf=self._sf,
-                    settings_service=self._settings,
-                    publisher=self.publisher,
-                    pubsub=self._pubsub,
-                    price_provider=self._price_provider,
-                    topic=str(msg.topic),
-                )
+                await self._dispatch(str(msg.topic), raw)
             except Exception:  # noqa: BLE001
                 logger.exception("error handling MQTT message")

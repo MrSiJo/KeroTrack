@@ -2,7 +2,10 @@
 
 Loads trusted readings and degree days, calibrates litres per HDD (``k``),
 then runs the seasonal runway simulation for every configured scenario and
-derives the run out and order by dates. ``persist_projection`` stores one
+derives the run out and order by dates. With at least 12 months of Nest
+heating hours and a positive Nest fit, the heating term is litres per
+heating hour times the expected heating hours instead (``heating_model``
+"nest"); ``k`` is still fitted and persisted as the HDD fallback. ``persist_projection`` stores one
 ``runway_projection`` row per scenario; the newest stored ``k`` is the
 fallback when a later fit fails.
 """
@@ -11,13 +14,20 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import desc, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from kerotrack.analysis.daily_usage import Calibration, Point, bucket_daily, calibrate
+from kerotrack.analysis.nest_model import (
+    calibrate_nest,
+    expected_hours_fn,
+    monthly_usage,
+    nest_model_active,
+)
 from kerotrack.analysis.hot_water import (
     hw_litres_for_weekday,
     hw_litres_per_day_avg,
@@ -25,6 +35,7 @@ from kerotrack.analysis.hot_water import (
     validate_schedule,
 )
 from kerotrack.clock import local_now, parse_local
+from kerotrack.ingest.nest import load_nest_monthly
 from kerotrack.models.hdd import HddDatum
 from kerotrack.models.reading import Reading, trusted_readings_clause
 from kerotrack.models.refill import ActualRefillCost
@@ -44,6 +55,8 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_K = 0.16
 CALIBRATION_WINDOW_DAYS = 400
+# The Nest fit is monthly, so it looks further back for clean months.
+NEST_CALIBRATION_WINDOW_DAYS = 730
 HORIZON_DAYS = 365
 NORMAL = "normal"
 _TS_FMT = "%Y-%m-%d %H:%M:%S"
@@ -75,6 +88,10 @@ class ProjectionBundle:
     calibration: Calibration
     outcomes: dict[str, ScenarioOutcome]
     active_scenario: str
+    heating_model: str = "hdd"  # "nest" | "hdd"
+    l_per_heating_hour: float | None = None  # set under the Nest model only
+    # Expected heating hours on a day (Nest model only).
+    expected_heating_hours: Callable[[date], float] | None = None
 
 
 async def load_hw(svc: SettingsService) -> tuple[list[dict], float, float]:
@@ -169,8 +186,11 @@ async def _calibrate_with(
     schedule: list[dict],
     minutes: float,
     rate: float,
+    nest_monthly: dict[str, float] | None = None,
 ) -> Calibration:
-    readings = await _trusted_readings_since(sf, now - timedelta(days=CALIBRATION_WINDOW_DAYS))
+    readings = await _trusted_readings_since(
+        sf, now - timedelta(days=max(CALIBRATION_WINDOW_DAYS, NEST_CALIBRATION_WINDOW_DAYS))
+    )
     points: list[Point] = []
     exclude = await _manual_refill_days(sf)
     for r in readings:
@@ -187,19 +207,51 @@ async def _calibrate_with(
         max_abs_daily_l=float(await svc.get("detection.max_daily_consumption_cold_l")),
         exclude_days=exclude,
     )
-    return calibrate(
-        days,
+    slots = slots_per_week(schedule)
+    hw_sched = hw_litres_per_day_avg(schedule, minutes, rate)
+    # The HDD fit keeps its 400 day window (the first day of a window has no
+    # previous day, so it starts the day after).
+    hdd_start = (now - timedelta(days=CALIBRATION_WINDOW_DAYS)).date()
+    nest_start = (now - timedelta(days=NEST_CALIBRATION_WINDOW_DAYS)).date()
+    cal = calibrate(
+        [d for d in days if d.day > hdd_start],
         hdd_by_day,
-        hw_l_per_day=hw_litres_per_day_avg(schedule, minutes, rate),
-        slots_per_week=slots_per_week(schedule),
+        hw_l_per_day=hw_sched,
+        slots_per_week=slots,
         fuel_rate_l_per_h=rate,
     )
+    if nest_monthly is None:
+        nest_monthly = await load_nest_monthly(sf)
+    nest = calibrate_nest(
+        monthly_usage([d for d in days if d.day > nest_start]),
+        nest_monthly,
+        hw_fixed=hw_sched,
+    )
+    active = nest_model_active(nest_monthly, nest.a)
+    cal = replace(
+        cal,
+        heating_model="nest" if active else "hdd",
+        l_per_heating_hour=nest.a,
+        nest_months_used=nest.months_used,
+        hw_per_day_nest=nest.hw_per_day,
+        l_per_heating_hour_free=nest.a_free,
+        nest_months_excluded=nest.months_excluded,
+    )
+    if active:
+        hw = nest.hw_per_day
+        minutes_prop = (
+            hw * 7 * 60 / (slots * rate)
+            if hw is not None and hw > 0 and slots > 0 and rate > 0
+            else None
+        )
+        cal = replace(cal, proposed_burner_minutes=minutes_prop)
+    return cal
 
 
 async def run_calibration(
     sf: async_sessionmaker, svc: SettingsService, *, now: datetime
 ) -> Calibration:
-    """Fit ``k`` (and the free hot water proposal) over the last 400 days."""
+    """Fit ``k`` (400 days), the Nest model (730 days) and the hot water proposal."""
     schedule, minutes, rate = await load_hw(svc)
     return await _calibrate_with(
         sf,
@@ -248,6 +300,7 @@ async def project(
     hw_l_per_day = hw_litres_per_day_avg(schedule, minutes, rate)
     hw_by_weekday = {wd: hw_litres_for_weekday(schedule, wd, minutes, rate) for wd in range(7)}
     hdd_by_day = await _hdd_by_day(sf)
+    nest_monthly = await load_nest_monthly(sf)
 
     calibration = await _calibrate_with(
         sf,
@@ -257,6 +310,7 @@ async def project(
         schedule=schedule,
         minutes=minutes,
         rate=rate,
+        nest_monthly=nest_monthly,
     )
     if calibration.k is not None and calibration.k > 0:
         k, k_source = calibration.k, "fit"
@@ -276,6 +330,20 @@ async def project(
     )
     expected_hdd = climatology(hdd_by_day)
 
+    heating_model = calibration.heating_model
+    a: float | None = None
+    expected_hours: Callable[[date], float] | None = None
+    heating_l: Callable[[date], float] | None = None
+    if heating_model == "nest" and calibration.l_per_heating_hour is not None:
+        a = float(calibration.l_per_heating_hour)
+        expected_hours = expected_hours_fn(nest_monthly)
+        nest_a, nest_hours = a, expected_hours
+
+        def heating_l(d: date) -> float:
+            return nest_a * nest_hours(d)
+    else:
+        heating_model = "hdd"
+
     def run(start_day: date, litres: float, multipliers: dict[int, float]):
         return simulate(
             RunwayInputs(
@@ -287,6 +355,7 @@ async def project(
                 multipliers=multipliers,
                 reserve_l=reserve_l,
                 horizon_days=HORIZON_DAYS,
+                heating_l=heating_l,
             )
         )
 
@@ -331,6 +400,9 @@ async def project(
         calibration=calibration,
         outcomes=outcomes,
         active_scenario=active,
+        heating_model=heating_model,
+        l_per_heating_hour=a,
+        expected_heating_hours=expected_hours,
     )
 
 

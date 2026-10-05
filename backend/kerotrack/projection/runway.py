@@ -1,8 +1,9 @@
 """Seasonal runway simulation (pure, no I/O).
 
-Projects the oil level day by day as hot water plus ``k`` times the expected
-degree days (scaled by a per month scenario multiplier), to find the run out
-date and the order by date.
+Projects the oil level day by day as hot water plus a heating term (``k``
+times the expected degree days, or under the Nest model litres per heating
+hour times the expected heating hours), scaled by a per month scenario
+multiplier, to find the run out date and the order by date.
 """
 
 from __future__ import annotations
@@ -26,6 +27,9 @@ class RunwayInputs:
     multipliers: dict[int, float]  # month -> heating multiplier; missing = 1.0
     reserve_l: float
     horizon_days: int = 365
+    # Nest model: litres of heating on a day before the scenario multiplier
+    # (a * expected heating hours). When set it replaces k * expected_hdd.
+    heating_l: Callable[[date], float] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,8 +111,11 @@ def simulate(inp: RunwayInputs) -> RunwayResult:
     prev = inp.start_day
     for i in range(1, inp.horizon_days + 1):
         d = inp.start_day + timedelta(days=i)
+        heating = (
+            inp.heating_l(prev) if inp.heating_l is not None else inp.k * inp.expected_hdd(prev)
+        )
         draw = inp.hw_by_weekday.get(prev.weekday(), 0.0) + (
-            inp.k * inp.expected_hdd(prev) * inp.multipliers.get(prev.month, 1.0)
+            heating * inp.multipliers.get(prev.month, 1.0)
         )
         litres -= max(draw, 0.0)
         series.append((d, litres))

@@ -504,3 +504,44 @@ async def test_undelivered_alert_warns_only_on_entering_the_state(
     await _run(sf, seeded_settings, NOW + timedelta(hours=1), [])
     assert undelivered(logging.WARNING) == []
     assert len(undelivered(logging.INFO)) == 1
+
+
+async def test_summary_reports_hdd_model_without_nest_data(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    summary = await build_summary(sf, seeded_settings, now=NOW)
+    assert summary["heating_model"] == "hdd"
+    assert summary["l_per_heating_hour"] is None
+
+    await _seed_readings(sf, NOW)
+    await _configure(seeded_settings, postcode="")
+    summary = await run_buying(
+        sf=sf, settings_service=seeded_settings, publisher=FakePublisher(), now=NOW
+    )
+    assert summary["heating_model"] == "hdd"
+    assert summary["l_per_heating_hour"] is None
+    assert summary["k"] is not None
+
+
+async def test_summary_reports_nest_model_when_active(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    from tests.unit.test_projection_service import NEST_A, _seed_nest
+
+    now = datetime(2026, 10, 4, 18, 0)
+    await _seed_nest(sf, seeded_settings, now, months=24)
+    await _configure(seeded_settings, postcode="")
+    publisher = FakePublisher()
+    summary = await run_buying(
+        sf=sf, settings_service=seeded_settings, publisher=publisher, now=now
+    )
+    assert summary["heating_model"] == "nest"
+    assert summary["l_per_heating_hour"] == pytest.approx(NEST_A, abs=0.02)
+    # The HDD k is still reported (and persisted) for the HDD model.
+    assert summary["k"] is not None
+    # The retained MQTT payload keeps its contract.
+    assert set(publisher.payloads[-1]) == PAYLOAD_KEYS
+    # build_summary reads the persisted model back.
+    again = await build_summary(sf, seeded_settings, now=now)
+    assert again["heating_model"] == "nest"
+    assert again["l_per_heating_hour"] == summary["l_per_heating_hour"]

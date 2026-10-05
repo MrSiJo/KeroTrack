@@ -90,6 +90,7 @@ EXPECTED_KEYS: list[tuple[str, str, str, object, bool]] = [
     }, False),
     ("schedule.buying_cron", "cron", "schedule", "0 7,13 * * *", False),
     ("mqtt.topic_buying", "string", "mqtt", "oiltank/buying", False),
+    ("mqtt.topic_nest_heating", "string", "mqtt", "kerotrack/nest_heating", False),
 ]
 
 
