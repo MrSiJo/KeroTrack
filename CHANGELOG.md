@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.3.0](https://github.com/MrSiJo/KeroTrack/compare/v1.2.0...v1.3.0) (2026-10-05)
+
+
+### Features
+
+* **analysis:** daily usage bucketing and k calibration fit ([faa78aa](https://github.com/MrSiJo/KeroTrack/commit/faa78aa4c4e295d00257cd08eb06503b18ff334e))
+* **analysis:** hot water litres from the boiler schedule ([fdd9408](https://github.com/MrSiJo/KeroTrack/commit/fdd94089bed4f8774b12c04518443243f3f063cd))
+* **analysis:** Nest heating hours as the heating signal ([a3d5cbd](https://github.com/MrSiJo/KeroTrack/commit/a3d5cbd0eaae7a9fd673ab5dc4b86d8bb48991b2))
+* **buying:** buy signal state machine ([3c56778](https://github.com/MrSiJo/KeroTrack/commit/3c5677869f6c63ff5ac04f37fafa47d39cf25685))
+* **buying:** supplier quote store, daily buying job, buy signal alerts and /api/buying ([9c2f164](https://github.com/MrSiJo/KeroTrack/commit/9c2f164f323a8f743ad9728a10eb00fa760a117a))
+* **db:** ensure_columns migration step and new nullable columns ([3607a8a](https://github.com/MrSiJo/KeroTrack/commit/3607a8ac8f7ce72d6d0e9a0efe860d8a296a2c8b))
+* **logging:** configure root logging from bootstrap log_level ([0914ac7](https://github.com/MrSiJo/KeroTrack/commit/0914ac707c979301ee99721fe69ffc0945eafcfe))
+* **projection:** seasonal runway service; analysis uses hot water schedule and fitted heating model ([f169bfc](https://github.com/MrSiJo/KeroTrack/commit/f169bfcb50754f20f43ef8e64766fda683ed807e))
+* **projection:** seasonal runway simulation and order by date ([6ba0034](https://github.com/MrSiJo/KeroTrack/commit/6ba0034fd423b2e44d3bf95e93d9828d70efcb08))
+* **quotes:** supplier quote models and Home Fuels Direct provider ([3474883](https://github.com/MrSiJo/KeroTrack/commit/34748837c0085d02beb5dab9b58520c177f34dbd))
+* **settings:** buying and projection settings, named weekday crons, daily notifier ([d04d547](https://github.com/MrSiJo/KeroTrack/commit/d04d54765c41ccf90e921751f889a680ffbd079a))
+* **ui:** one order countdown everywhere; Buying is prices, Forecast is the runway ([1d56d9a](https://github.com/MrSiJo/KeroTrack/commit/1d56d9aadedf645b1537ef7fdc4602fd087663ec))
+
+
+### Bug Fixes
+
+* **analysis:** calibrate free fit on monthly aggregates; keep the first partial cost period ([5fc4cc2](https://github.com/MrSiJo/KeroTrack/commit/5fc4cc268eeaceaead4d1b39aeea4f6af5062069))
+* **buying:** final review fixes ([537ee11](https://github.com/MrSiJo/KeroTrack/commit/537ee1128cf9b655b6908da692ac9dd63c29c7a9))
+* **cost:** anchor cost periods on the refill log, snapped to the real level jump ([69c483e](https://github.com/MrSiJo/KeroTrack/commit/69c483ee667699517535963afca858bb0183784f))
+* **deps:** pin pydantic-core 2.46.5 to match pydantic 2.13.5; regenerate frontend lock ([0d859a8](https://github.com/MrSiJo/KeroTrack/commit/0d859a8f4b89254f083736dbe5abd8a8489ccc41))
+* **notifier:** daily notifier cron, migrate untouched cron defaults, generic apprise send ([e08a056](https://github.com/MrSiJo/KeroTrack/commit/e08a05613e73f9866d281ec106b6c701586188fe))
+* **settings:** surface rejected saves; allow LAN notification targets ([ba411b7](https://github.com/MrSiJo/KeroTrack/commit/ba411b77547b5c97594e0071098032fb1036f49b))
+* **ui:** CSP hash for SvelteKit's inline bootstrap script ([777ea04](https://github.com/MrSiJo/KeroTrack/commit/777ea04bc7b4236873d39a5da033024a5b8823bf))
+
 ## [1.2.0](https://github.com/MrSiJo/KeroTrack/compare/v1.1.0...v1.2.0) (2026-07-08)
 
 
