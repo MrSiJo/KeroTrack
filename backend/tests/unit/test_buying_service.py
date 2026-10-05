@@ -699,3 +699,15 @@ async def test_trigger_compares_the_all_in_price_not_ex_vat(
     )
     assert summary["state"] == "buy_now"
     assert "112.35p" in sent[0]["body"]
+
+
+
+async def test_best_ppl_keeps_precision_so_display_rounding_matches_the_table(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    """£560.26 / 500 L is 112.052p: two decimals (112.05) would show as 112.0p."""
+    row = _quote(NOW, 106.0)
+    row.total_inc_vat = 560.26
+    await _add(sf, row)
+    summary = await build_summary(sf, seeded_settings, now=NOW)
+    assert summary["best"]["ppl"] == pytest.approx(112.052)

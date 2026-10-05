@@ -281,7 +281,7 @@ async def run_buying(
         "best_total": _round(best.total_inc_vat, 2) if best is not None else None,
         "best_supplier": best.supplier if best is not None else None,
         # All in (VAT, delivery, fees): the trigger's basis.
-        "best_ppl": _round(_row_all_in(best), 2),
+        "best_ppl": _round(_row_all_in(best), 4),
         # Ex VAT, kept for existing MQTT consumers.
         "best_ppl_effective": _round(best.ppl_effective, 2) if best is not None else None,
         "trigger_ppl": trigger,
@@ -438,7 +438,7 @@ async def build_summary(sf: async_sessionmaker, svc: SettingsService, *, now: da
         {
             "supplier": best.supplier,
             "total_inc_vat": best.total_inc_vat,
-            "ppl": _round(_row_all_in(best), 2),
+            "ppl": _round(_row_all_in(best), 4),
             "ppl_effective": _round(best.ppl_effective, 2),
             "delivery_label": best.delivery_label,
             "fetched_at": best.fetched_at,
