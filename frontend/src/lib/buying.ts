@@ -115,25 +115,32 @@ export function latestQuotes(quotes: BuyingQuote[]): BuyingQuote[] {
     );
 }
 
-/** Index line and best non-urgent ok quote per fetch, for the price chart. */
+/**
+ * Index line and best non-urgent ok quote per day, for the price chart.
+ *
+ * Suppliers poll at different times of day, so one fetch holds only some of
+ * them; the daily best compares them all. Each point sits at the fetch time
+ * of that day's winning quote.
+ */
 export function priceHistory(quotes: BuyingQuote[]): {
   index: [string, number][];
   best: [string, number][];
 } {
   const index: [string, number][] = [];
-  const bestMap = new Map<string, number>();
+  const bestByDay = new Map<string, [string, number]>();
   for (const q of quotes) {
     if (q.ppl_effective == null) continue;
     if (q.kind === "index") {
       index.push([q.fetched_at, q.ppl_effective]);
     } else if (q.kind === "quote" && !q.urgent && q.ok) {
-      const cur = bestMap.get(q.fetched_at);
-      if (cur === undefined || q.ppl_effective < cur)
-        bestMap.set(q.fetched_at, q.ppl_effective);
+      const day = q.fetched_at.slice(0, 10);
+      const cur = bestByDay.get(day);
+      if (cur === undefined || q.ppl_effective < cur[1])
+        bestByDay.set(day, [q.fetched_at, q.ppl_effective]);
     }
   }
   index.sort((a, b) => a[0].localeCompare(b[0]));
-  const best = [...bestMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  const best = [...bestByDay.values()].sort((a, b) => a[0].localeCompare(b[0]));
   return { index, best };
 }
 

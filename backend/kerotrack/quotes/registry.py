@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import re
 
@@ -60,6 +61,36 @@ def _err(e: Exception, req: QuoteRequest) -> str:
     return type(e).__name__ + ": " + text[:120]
 
 
+async def _poll_one(
+    client: httpx.AsyncClient, req: QuoteRequest, name: str, email_pattern: str
+) -> PollResult:
+    provider = PROVIDERS.get(name)
+    if provider is None:
+        return PollResult(name, [], "unknown provider")
+    requires_email = bool(getattr(provider, "requires_email", False))
+    if requires_email:
+        email = quote_email(email_pattern, name)
+        if email is None:
+            return PollResult(name, [], NO_EMAIL)
+        preq = dataclasses.replace(req, email=email)
+    else:
+        preq = dataclasses.replace(req, email=None)
+    # A retry would ask an email supplier for a second quote, and some of
+    # them email every quote, so they get one attempt.
+    attempts = 1 if requires_email else 2
+    error: str | None = None
+    options = []
+    for _attempt in range(attempts):
+        try:
+            fetched = await provider.fetch(client, preq)  # type: ignore[attr-defined]
+            options = [o for o in fetched if is_sane(o)]
+            error = None if options else "no prices"
+            break
+        except Exception as e:  # noqa: BLE001 - any provider failure is recorded, not raised
+            error = _err(e, preq)
+    return PollResult(name, options, error)
+
+
 async def poll(
     client: httpx.AsyncClient,
     req: QuoteRequest,
@@ -67,36 +98,13 @@ async def poll(
     *,
     email_pattern: str = "",
 ) -> list[PollResult]:
-    """Poll each named provider once, retrying once on failure.
+    """Poll the named providers concurrently; results keep the order of `names`.
 
-    Providers that need an email get their own address from `email_pattern`;
-    without one they are skipped and recorded as an error. Options outside
-    the plausible price range are discarded.
+    Email free providers get one retry on failure. Providers that need an
+    email get their own address from `email_pattern`; without one they are
+    skipped and recorded as an error. Options outside the plausible price
+    range are discarded.
     """
-    results: list[PollResult] = []
-    for name in names:
-        provider = PROVIDERS.get(name)
-        if provider is None:
-            results.append(PollResult(name, [], "unknown provider"))
-            continue
-        preq = req
-        if getattr(provider, "requires_email", False):
-            email = quote_email(email_pattern, name)
-            if email is None:
-                results.append(PollResult(name, [], NO_EMAIL))
-                continue
-            preq = dataclasses.replace(req, email=email)
-        else:
-            preq = dataclasses.replace(req, email=None)
-        error: str | None = None
-        options = []
-        for _attempt in range(2):
-            try:
-                fetched = await provider.fetch(client, preq)  # type: ignore[attr-defined]
-                options = [o for o in fetched if is_sane(o)]
-                error = None if options else "no prices"
-                break
-            except Exception as e:  # noqa: BLE001 - any provider failure is recorded, not raised
-                error = _err(e, preq)
-        results.append(PollResult(name, options, error))
-    return results
+    return list(
+        await asyncio.gather(*(_poll_one(client, req, n, email_pattern) for n in names))
+    )

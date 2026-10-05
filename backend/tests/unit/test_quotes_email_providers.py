@@ -249,3 +249,13 @@ async def test_poll_discards_implausible_prices() -> None:
     async with httpx.AsyncClient() as c:
         res = await poll(c, REQ, ["westernfuel"], email_pattern=PATTERN)
     assert res[0].options == [] and res[0].error == "no prices"
+
+
+@respx.mock
+async def test_email_providers_are_not_retried() -> None:
+    route = respx.post(WesternFuel.QUOTE_URL).respond(status_code=502)
+    hfd = respx.get("https://homefuelsdirect.co.uk/index.php").respond(status_code=502)
+    async with httpx.AsyncClient() as c:
+        res = await poll(c, REQ, ["westernfuel", "homefuelsdirect"], email_pattern=PATTERN)
+    assert route.call_count == 1 and hfd.call_count == 2
+    assert [r.supplier for r in res] == ["westernfuel", "homefuelsdirect"]

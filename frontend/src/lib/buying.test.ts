@@ -108,6 +108,19 @@ describe("buying helpers", () => {
     expect(h.best).toEqual([["2026-10-02 01:00:00", 110]]);
   });
 
+  it("takes the best quote per day across suppliers polled at different times", () => {
+    const rows = [
+      q({ id: 1, fetched_at: "2026-10-05 07:00:00", supplier: "hfd", ppl_effective: 110 }),
+      q({ id: 2, fetched_at: "2026-10-05 10:30:00", supplier: "wf", ppl_effective: 106 }),
+      q({ id: 3, fetched_at: "2026-10-05 13:00:00", supplier: "hfd", ppl_effective: 111 }),
+      q({ id: 4, fetched_at: "2026-10-06 07:00:00", supplier: "hfd", ppl_effective: 109 }),
+    ];
+    expect(priceHistory(rows).best).toEqual([
+      ["2026-10-05 10:30:00", 106],
+      ["2026-10-06 07:00:00", 109],
+    ]);
+  });
+
   it("formats nullable numbers", () => {
     expect(fixed(0.12345, 3)).toBe("0.123");
     expect(fixed(null, 2)).toBe("n/a");
