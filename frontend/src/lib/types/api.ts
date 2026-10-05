@@ -144,6 +144,8 @@ export type BuyingScenario = {
   series: [string, number][];
 };
 
+export type HeatingModel = "nest" | "hdd";
+
 export type BuyingSummary = {
   state: BuyingState;
   updated_at: string | null;
@@ -161,6 +163,10 @@ export type BuyingSummary = {
   active_scenario: string | null;
   k: number | null;
   hw_l_per_day: number | null;
+  /** Which heating model the runway uses. */
+  heating_model?: HeatingModel;
+  /** Litres per Nest heating hour; set under the Nest model only. */
+  l_per_heating_hour?: number | null;
   context: {
     index_percentile_365d: number | null;
     /** Pence, positive means dearer. */
@@ -181,4 +187,11 @@ export type BuyingCalibration = {
   heating_days: number;
   current_burner_minutes: number | null;
   current_hw_l_per_day: number | null;
+  heating_model?: HeatingModel;
+  /** Fixed hot water fit: the one the runway uses under the Nest model. */
+  l_per_heating_hour?: number | null;
+  l_per_heating_hour_free?: number | null;
+  hw_per_day_nest?: number | null;
+  nest_months_used?: number | null;
+  nest_months_excluded?: number | null;
 };

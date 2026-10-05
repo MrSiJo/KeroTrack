@@ -1,7 +1,18 @@
 <script lang="ts">
   import TankSilhouette from "$lib/components/TankSilhouette.svelte";
+  import { daysUntil, isoToday, relativeDays } from "$lib/buying";
+  import { activeScenario, formatDate, formatStamp } from "$lib/countdown";
   import { liveStatus } from "$lib/stores/liveStatus";
   import { settings } from "$lib/stores/settings";
+  import type { BuyingSummary } from "$lib/types/api";
+
+  type Props = {
+    /** Runway summary from the dashboard (null while it loads). */
+    summary?: BuyingSummary | null;
+    /** The dashboard's summary fetch failed. */
+    summaryFailed?: boolean;
+  };
+  let { summary = undefined, summaryFailed = false }: Props = $props();
 
   function setting(key: string): unknown {
     return $settings.items.find((i) => i.key === key)?.value;
@@ -19,7 +30,16 @@
 
   let pct = $derived(reading?.percentage_remaining ?? 0);
   let bars = $derived(reading?.bars_remaining ?? null);
-  let daysRemaining = $derived(analysis?.estimated_days_remaining ?? null);
+  // Reserve date comes from the runway (same source as the order countdown).
+  // The analysis value is only a fallback when the runway is unavailable.
+  let today = $derived(isoToday());
+  let useFallback = $derived(summary === undefined || (summaryFailed && !summary));
+  let reserveDate = $derived(
+    useFallback
+      ? (analysis?.estimated_empty_date ?? null)
+      : (activeScenario(summary)?.run_out ?? null),
+  );
+  let daysRemaining = $derived(daysUntil(reserveDate, today));
   let costToFill = $derived(
     reading?.cost_to_fill != null && reading.cost_to_fill !== ""
       ? Number(reading.cost_to_fill)
@@ -47,7 +67,7 @@
   );
 
   function fmtNum(v: number | null | undefined, digits = 0): string {
-    return v == null || !Number.isFinite(v) ? "—" : v.toFixed(digits);
+    return v == null || !Number.isFinite(v) ? "n/a" : v.toFixed(digits);
   }
 
   const toneClass: Record<string, string> = {
@@ -60,7 +80,7 @@
 <section class="relative overflow-hidden rounded-lg border border-border bg-bg-panel p-4">
   <div class="absolute left-0 top-0 h-full w-[3px] bg-brand-blue"></div>
   <div class="text-[10px] font-medium uppercase tracking-wide text-brand-blue">
-    Now — Dashboard
+    Now: Dashboard
   </div>
 
   <div class="mt-3 flex items-start gap-4">
@@ -79,7 +99,7 @@
       <div>
         <div class="text-[10px] uppercase tracking-wide text-text-label">Bars · Remaining</div>
         <div class="mt-0.5 flex items-baseline gap-2 font-mono">
-          <span class="text-2xl font-semibold text-text">{bars ?? "—"}<span class="text-sm text-text-muted">/10</span></span>
+          <span class="text-2xl font-semibold text-text">{bars ?? "n/a"}<span class="text-sm text-text-muted">/10</span></span>
           <span class="text-text-subtle">·</span>
           <span class={`text-2xl font-semibold ${toneClass[levelTone]}`}>{fmtNum(pct, 0)}<span class="text-sm text-text-muted">%</span></span>
         </div>
@@ -87,11 +107,11 @@
       </div>
 
       <div>
-        <div class="text-[10px] uppercase tracking-wide text-text-label">Days to empty</div>
+        <div class="text-[10px] uppercase tracking-wide text-text-label">Days to reserve</div>
         <div class="mt-0.5 font-mono">
           <span class={`text-xl font-semibold ${toneClass[daysTone]}`}>{fmtNum(daysRemaining, 0)}</span>
-          {#if analysis?.estimated_empty_date}
-            <span class="ml-2 text-[11px] text-text-subtle">~ {analysis.estimated_empty_date}</span>
+          {#if reserveDate}
+            <span class="ml-2 text-[11px] text-text-subtle">{formatDate(reserveDate)}, {relativeDays(daysRemaining)}</span>
           {/if}
         </div>
       </div>
@@ -99,7 +119,7 @@
       <div>
         <div class="text-[10px] uppercase tracking-wide text-text-label">Cost to fill</div>
         <div class="mt-0.5 font-mono">
-          <span class="text-xl font-semibold text-text">£{fmtNum(costToFill as number | null | undefined, 0)}</span>
+          <span class="text-xl font-semibold text-text">{costToFill != null && Number.isFinite(costToFill) ? `£${costToFill.toFixed(0)}` : "n/a"}</span>
           {#if currentPpl != null}
             <span class="ml-2 text-[11px] text-text-subtle">@ {fmtNum(currentPpl, 2)} p/L</span>
           {/if}
@@ -117,13 +137,13 @@
         <span class="rounded border border-brand-red/40 bg-red-950/40 px-2 py-1 text-[11px] text-brand-red">Leak detected</span>
       {/if}
       {#if levelTone === "red"}
-        <span class="rounded border border-brand-red/40 bg-red-950/40 px-2 py-1 text-[11px] text-brand-red">Critical level — order now</span>
+        <span class="rounded border border-brand-red/40 bg-red-950/40 px-2 py-1 text-[11px] text-brand-red">Critical level, order now</span>
       {:else if levelTone === "amber"}
-        <span class="rounded border border-brand-amber/40 bg-amber-950/40 px-2 py-1 text-[11px] text-brand-amber">Below {lowThreshold}% — plan a refill</span>
+        <span class="rounded border border-brand-amber/40 bg-amber-950/40 px-2 py-1 text-[11px] text-brand-amber">Below {lowThreshold}%, plan a refill</span>
       {/if}
     </div>
     <div class="font-mono text-[11px] text-text-subtle">
-      last reading {reading?.date ?? "—"}
+      last reading {reading?.date ? formatStamp(reading.date) : "n/a"}
     </div>
   </div>
 </section>

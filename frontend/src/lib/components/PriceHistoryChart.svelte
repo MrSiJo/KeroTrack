@@ -52,7 +52,10 @@
         {
           name: "National index",
           type: "line",
-          showSymbol: false,
+          // The index is polled less often than quotes; with few points a
+          // bare line can vanish, so draw its symbols.
+          showSymbol: hist.index.length < 60,
+          symbolSize: 5,
           data: hist.index,
           lineStyle: { color: "#3b82f6", width: 2 },
           itemStyle: { color: "#3b82f6" },

@@ -143,7 +143,9 @@
 
     const sigma =
       Number.isFinite(stdDailyL) && stdDailyL > 0 ? stdDailyL : 0;
-    const drawFan = sigma > 0;
+    // horizonDays = 0 means history only: no projection series at all.
+    const project = horizonDays > 0;
+    const drawFan = project && sigma > 0;
 
     const pairs = (
       values: (number | null)[],
@@ -257,7 +259,9 @@
         : undefined,
     };
 
-    const series: echarts.SeriesOption[] = [...fanSeries, medianSeries];
+    const series: echarts.SeriesOption[] = project
+      ? [...fanSeries, medianSeries]
+      : [];
 
     if (historyDates.length > 0) {
       series.push({
@@ -280,12 +284,14 @@
         trigger: "axis",
         axisPointer: { type: "line" },
         valueFormatter: (v: unknown) =>
-          typeof v === "number" ? `${v.toFixed(0)} L` : "—",
+          typeof v === "number" ? `${v.toFixed(0)} L` : "n/a",
       },
       legend: {
-        data: drawFan
-          ? ["Forecast (median)", "p25-p75 (IQR)", "p5-p25", "History"]
-          : ["Forecast (median)", "History"],
+        data: !project
+          ? ["History"]
+          : drawFan
+            ? ["Forecast (median)", "p25-p75 (IQR)", "p5-p25", "History"]
+            : ["Forecast (median)", "History"],
         top: 4,
         right: 12,
         textStyle: { color: "#94a3b8" },
@@ -320,12 +326,12 @@
   );
 </script>
 
-{#if !history || history.length === 0 || !Number.isFinite(meanDailyL) || meanDailyL <= 0}
+{#if !history || history.length === 0 || (horizonDays > 0 && (!Number.isFinite(meanDailyL) || meanDailyL <= 0))}
   <div
     class="flex items-center justify-center rounded border border-border bg-bg-panel text-xs text-text-subtle"
     style="height: {height};"
   >
-    Not enough history to build a forecast yet
+    {horizonDays > 0 ? "Not enough history to build a forecast yet" : "No readings in the last year yet"}
   </div>
 {:else}
   <div bind:this={el} style="width: 100%; height: {height};"></div>

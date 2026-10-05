@@ -5,6 +5,7 @@
   import { settings } from "$lib/stores/settings";
   import { activeGroup, search } from "$lib/stores/settingsUi";
   import type { SettingDef, SettingItem } from "$lib/types/api";
+  import CalibrationPanel from "$lib/components/CalibrationPanel.svelte";
   import RunPanel from "$lib/components/RunPanel.svelte";
 
   type Props = {
@@ -56,6 +57,11 @@
 
   const HIDDEN_KEYS = new Set<string>(["web.title"]);
 
+  // The calibration panel sits under the burner minutes setting in the
+  // boiler group (or at the end of the group if that key is missing).
+  const BURNER_KEY = "boiler.hw_burner_minutes_per_slot";
+  let showCalibration = $derived($activeGroup === "boiler" && !$search.trim());
+
   const GROUP_ORDER: Record<string, string[]> = {
     mqtt: [
       "mqtt.broker",
@@ -98,6 +104,8 @@
       $activeGroup,
     );
   });
+
+  let burnerVisible = $derived(visibleItems().some((i) => i.key === BURNER_KEY));
 
   let resettingGroup = $state(false);
 
@@ -330,7 +338,13 @@
             {/if}
           </div>
         </div>
+        {#if showCalibration && item.key === BURNER_KEY}
+          <CalibrationPanel onUseMinutes={(m) => onChange(BURNER_KEY, m)} />
+        {/if}
       {/each}
+      {#if showCalibration && !burnerVisible}
+        <CalibrationPanel onUseMinutes={(m) => onChange(BURNER_KEY, m)} />
+      {/if}
       {#if visibleItems().length === 0}
         <p class="px-4 py-6 text-sm text-text-subtle">No matches.</p>
       {/if}

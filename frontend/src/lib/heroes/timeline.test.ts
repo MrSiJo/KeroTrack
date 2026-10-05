@@ -56,22 +56,24 @@ describe("buildTimelineEvents", () => {
   });
 
   it("computes a 0..1 normalised position within the window", () => {
-    const today = new Date();
-    const recent = new Date(today.getTime() - 0)
-      .toISOString()
-      .slice(0, 10);
-    const oldest = new Date(today.getTime() - 30 * 24 * 3600 * 1000)
-      .toISOString()
-      .slice(0, 10);
+    // Stamps are built from Date.now() minus fixed offsets (as UTC, which is
+    // how buildTimelineEvents parses them), so the test cannot depend on the
+    // time of day: a fixed clock time like 10:00 lies in the future before
+    // 10:00 UTC and gets dropped.
+    const DAY = 24 * 3600 * 1000;
+    const stampAgo = (ms: number) =>
+      new Date(Date.now() - ms).toISOString().slice(0, 19).replace("T", " ");
     const events = buildTimelineEvents(
       [
-        { date: `${oldest} 10:00:00` } as any,
-        { date: `${recent} 10:00:00` } as any,
+        { date: stampAgo(30 * DAY) } as any,
+        { date: stampAgo(60 * 1000) } as any,
       ],
       31,
     );
+    expect(events).toHaveLength(2);
     expect(events[0].position).toBeGreaterThanOrEqual(0);
     expect(events[0].position).toBeLessThanOrEqual(1);
+    expect(events[0].position).toBeCloseTo(1 / 31, 2);
     expect(events[1].position).toBeCloseTo(1, 1);
   });
 });
