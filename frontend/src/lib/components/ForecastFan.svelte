@@ -12,6 +12,8 @@
     horizonDays?: number;
     height?: string;
     lowOilThresholdL?: number;
+    // Optional noise-resistant level trend, drawn dotted over the history.
+    trend?: HistoryPoint[];
   };
 
   let {
@@ -21,6 +23,7 @@
     horizonDays = 120,
     height = "360px",
     lowOilThresholdL,
+    trend = [],
   }: Props = $props();
 
   let el: HTMLDivElement | null = $state(null);
@@ -278,6 +281,21 @@
       });
     }
 
+    const showTrend = trend.length > 0;
+    if (showTrend) {
+      series.push({
+        name: "Trend",
+        type: "line",
+        data: trend.map((t) => [t.date.slice(0, 10), t.litres] as [string, number]),
+        symbol: "none",
+        smooth: true,
+        lineStyle: { color: "#f59e0b", width: 2, type: "dotted" },
+        itemStyle: { color: "#f59e0b" },
+        z: 6,
+      });
+    }
+    const historyLegend = showTrend ? ["History", "Trend"] : ["History"];
+
     return {
       animation: false,
       tooltip: {
@@ -288,10 +306,10 @@
       },
       legend: {
         data: !project
-          ? ["History"]
+          ? historyLegend
           : drawFan
-            ? ["Forecast (median)", "p25-p75 (IQR)", "p5-p25", "History"]
-            : ["Forecast (median)", "History"],
+            ? ["Forecast (median)", "p25-p75 (IQR)", "p5-p25", ...historyLegend]
+            : ["Forecast (median)", ...historyLegend],
         top: 4,
         right: 12,
         textStyle: { color: "#94a3b8" },

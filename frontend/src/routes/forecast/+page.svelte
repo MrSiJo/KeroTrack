@@ -17,6 +17,7 @@
     settingNumber,
   } from "$lib/countdown";
   import { settings } from "$lib/stores/settings";
+  import { dailyMedians, usageTrend } from "$lib/usageTrend";
   import type { AnalysisResult, BuyingSummary } from "$lib/types/api";
 
   type HistoryPoint = { date: string; litres: number };
@@ -28,6 +29,7 @@
   let summary = $state<BuyingSummary | null>(null);
   let today = $state(isoToday());
   let history = $state<HistoryPoint[]>([]);
+  let trend = $state<HistoryPoint[]>([]);
   let consumptionStats = $state<{ mean: number; std: number }>({
     mean: 0,
     std: 0,
@@ -143,6 +145,15 @@
         series.push({ date: r.date, litres: Number(r.litres_remaining) });
       }
       history = series;
+      // The trend uses every reading of the day (median), not just the
+      // first, so a single ghost echo at midnight cannot steer it.
+      trend = usageTrend(
+        dailyMedians(
+          (readingsR.value.items ?? []).filter(
+            (r) => (r.date ?? "").slice(0, 10) >= cutoffStr,
+          ),
+        ),
+      );
     }
 
     const histItems = histR.status === "fulfilled" ? (histR.value.items ?? []) : [];
@@ -258,12 +269,14 @@
         </span>
       </div>
       <p class="text-[11px] text-text-subtle">
-        Daily tank level over the last year. See the runway above for order and
-        reserve dates.
+        Daily tank level over the last year. The dotted line is a trend that
+        ignores sensor glitches (phantom echoes and drop-outs). See the runway
+        above for order and reserve dates.
       </p>
       <div class="rounded-lg border border-border bg-bg-panel p-3">
         <ForecastFan
           history={history}
+          {trend}
           meanDailyL={consumptionStats.mean}
           stdDailyL={consumptionStats.std}
           horizonDays={FAN_HORIZON_DAYS}
