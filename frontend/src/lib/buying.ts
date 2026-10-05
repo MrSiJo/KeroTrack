@@ -71,6 +71,15 @@ export function supplierName(key: string): string {
   return SUPPLIERS[key] ?? key;
 }
 
+/**
+ * What a litre really costs at checkout: the all in total (VAT, delivery
+ * and service fees included) over the litres quoted, in pence.
+ */
+export function allInPpl(q: Pick<BuyingQuote, "total_inc_vat" | "litres">): number | null {
+  if (q.total_inc_vat == null || !q.litres) return null;
+  return (q.total_inc_vat / q.litres) * 100;
+}
+
 /** Local `YYYY-MM-DD` for a Date. */
 export function isoToday(d: Date = new Date()): string {
   const p = (n: number) => String(n).padStart(2, "0");

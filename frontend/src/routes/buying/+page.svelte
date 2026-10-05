@@ -8,6 +8,7 @@
     formatGBP,
     formatPpl,
     supplierName,
+    allInPpl,
   } from "$lib/buying";
   import {
     formatDate,
@@ -148,7 +149,8 @@
                 <th class="px-3 py-2">Supplier</th>
                 <th class="px-3 py-2">Delivery</th>
                 <th class="px-3 py-2 text-right">Total</th>
-                <th class="px-3 py-2 text-right">Effective</th>
+                <th class="px-3 py-2 text-right" title="Total divided by litres: VAT, delivery and fees included">Per litre</th>
+                <th class="px-3 py-2 text-right" title="Per litre with fees included but VAT removed; the buy trigger uses this">Ex VAT</th>
                 <th class="px-3 py-2 text-right">Fees</th>
                 <th class="px-3 py-2">Age</th>
               </tr>
@@ -170,10 +172,11 @@
                   </td>
                   {#if r.ok}
                     <td class="px-3 py-1.5 text-right font-mono">{formatGBP(r.total_inc_vat)}</td>
-                    <td class="px-3 py-1.5 text-right font-mono">{formatPpl(r.ppl_effective)}</td>
+                    <td class="px-3 py-1.5 text-right font-mono">{formatPpl(allInPpl(r))}</td>
+                    <td class="px-3 py-1.5 text-right font-mono text-text-muted">{formatPpl(r.ppl_effective)}</td>
                     <td class="px-3 py-1.5 text-right font-mono">{formatGBP(r.fees_inc_vat ?? 0)}</td>
                   {:else}
-                    <td colspan="3" class="px-3 py-1.5 text-brand-red">
+                    <td colspan="4" class="px-3 py-1.5 text-brand-red">
                       Failed{r.error ? `: ${r.error}` : ""}
                     </td>
                   {/if}
@@ -185,6 +188,7 @@
         </div>
         <p class="mt-1 text-xs text-text-subtle">
           One row per supplier, using its standard delivery. Faster windows cost more.
+          Total and Per litre include VAT, delivery and any service fee; Ex VAT is the same price without VAT, which the buy trigger uses.
         </p>
       {/if}
     </section>

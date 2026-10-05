@@ -13,6 +13,7 @@ import {
   stateLabel,
   stateTone,
   supplierName,
+  allInPpl,
 } from "$lib/buying";
 import type { BuyingQuote } from "$lib/types/api";
 
@@ -119,6 +120,13 @@ describe("buying helpers", () => {
       ["2026-10-05 10:30:00", 106],
       ["2026-10-06 07:00:00", 109],
     ]);
+  });
+
+  it("prices a litre all in from the total", () => {
+    // Western Fuel 2026-10-05: £560.26 for 500 L incl. £12 fee and VAT.
+    expect(allInPpl({ total_inc_vat: 560.26, litres: 500 })).toBeCloseTo(112.05, 2);
+    expect(allInPpl({ total_inc_vat: null, litres: 500 })).toBeNull();
+    expect(allInPpl({ total_inc_vat: 560.26, litres: 0 })).toBeNull();
   });
 
   it("formats nullable numbers", () => {
