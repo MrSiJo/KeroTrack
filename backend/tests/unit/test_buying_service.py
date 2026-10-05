@@ -29,6 +29,7 @@ PAYLOAD_KEYS = {
     "state",
     "best_total",
     "best_supplier",
+    "best_ppl",
     "best_ppl_effective",
     "trigger_ppl",
     "headroom_l",
@@ -138,6 +139,9 @@ async def test_run_buying_writes_quotes_alerts_and_publishes(
     assert payload["state"] == "buy_now"
     assert payload["best_total"] == pytest.approx(551.25)
     assert payload["best_ppl_effective"] == pytest.approx(105.0)
+    # The trigger compares the all in price: £551.25 / 500 L = 110.25p.
+    assert payload["best_ppl"] == pytest.approx(110.25)
+    assert summary["best"]["ppl"] == pytest.approx(110.25)
     assert payload["trigger_ppl"] == 120.0
     assert payload["headroom_l"] == pytest.approx(1225.0 * 0.95 - 403.0, abs=0.1)
     assert payload["scenario"] == "normal"
@@ -383,7 +387,7 @@ async def test_best_change_30d_positive_when_dearer_today(
 ) -> None:
     await _add(sf, _quote(NOW - timedelta(days=30, hours=6), 100.0), _quote(NOW, 105.0))
     summary = await build_summary(sf, seeded_settings, now=NOW)
-    assert summary["context"]["best_change_30d"] == pytest.approx(5.0)
+    assert summary["context"]["best_change_30d"] == pytest.approx(5.25)  # all in, 5p ex VAT
 
 
 async def test_best_change_30d_negative_when_cheaper_today(
@@ -391,7 +395,7 @@ async def test_best_change_30d_negative_when_cheaper_today(
 ) -> None:
     await _add(sf, _quote(NOW - timedelta(days=30, hours=6), 110.0), _quote(NOW, 105.0))
     summary = await build_summary(sf, seeded_settings, now=NOW)
-    assert summary["context"]["best_change_30d"] == pytest.approx(-5.0)
+    assert summary["context"]["best_change_30d"] == pytest.approx(-5.25)  # all in, 5p ex VAT
 
 
 async def test_best_change_30d_none_without_month_ago_quote(
@@ -671,3 +675,27 @@ async def test_daily_run_with_no_daily_providers_writes_nothing(
     async with sf() as session:
         n = (await session.execute(select(func.count()).select_from(PriceQuote))).scalar_one()
     assert n == 0
+
+
+
+async def test_trigger_compares_the_all_in_price_not_ex_vat(
+    sf: async_sessionmaker, seeded_settings
+) -> None:
+    """107p ex VAT is 112.35p all in: a 110p trigger must not fire."""
+    await _seed_readings(sf, NOW)
+    await _configure(seeded_settings, postcode="")
+    await seeded_settings.set("buying.trigger_ppl", 110.0)
+    await _add(sf, _quote(NOW, 107.0))
+    sent: list[dict[str, Any]] = []
+    summary = await run_buying(
+        sf=sf, settings_service=seeded_settings, publisher=None, now=NOW,
+        apprise_factory=_factory(sent),
+    )
+    assert summary["state"] == "wait" and sent == []
+    await seeded_settings.set("buying.trigger_ppl", 112.5)
+    summary = await run_buying(
+        sf=sf, settings_service=seeded_settings, publisher=None, now=NOW,
+        apprise_factory=_factory(sent),
+    )
+    assert summary["state"] == "buy_now"
+    assert "112.35p" in sent[0]["body"]

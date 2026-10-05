@@ -74,6 +74,11 @@ def quote_email(pattern: str, provider: str) -> str | None:
     return pattern.replace("{site}", provider)
 
 
+def all_in_ppl(total_inc_vat: float, litres: int) -> float:
+    """What a litre really costs: pence per litre with VAT, delivery and fees."""
+    return total_inc_vat / litres * 100
+
+
 def best_option(options: list[QuoteOption]) -> QuoteOption | None:
     """Cheapest non urgent option by all-in total, or None."""
     standard = [o for o in options if not o.urgent]

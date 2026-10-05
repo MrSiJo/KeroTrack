@@ -105,8 +105,9 @@ describe("buying helpers", () => {
       q({ fetched_at: "2026-10-03 01:00:00", ppl_effective: 95, ok: 0 }),
     ];
     const h = priceHistory(rows);
-    expect(h.index).toEqual([["2026-10-02 00:00:00", 108]]);
-    expect(h.best).toEqual([["2026-10-02 01:00:00", 110]]);
+    // VAT added: the chart shows real prices, like the trigger.
+    expect(h.index).toEqual([["2026-10-02 00:00:00", 113.4]]);
+    expect(h.best).toEqual([["2026-10-02 01:00:00", 115.5]]);
   });
 
   it("takes the best quote per day across suppliers polled at different times", () => {
@@ -116,14 +117,14 @@ describe("buying helpers", () => {
       q({ id: 3, fetched_at: "2026-10-05 13:00:00", supplier: "hfd", ppl_effective: 111 }),
       q({ id: 4, fetched_at: "2026-10-06 07:00:00", supplier: "hfd", ppl_effective: 109 }),
     ];
-    expect(priceHistory(rows).best).toEqual([
-      ["2026-10-05 10:30:00", 106],
-      ["2026-10-06 07:00:00", 109],
-    ]);
+    const best = priceHistory(rows).best;
+    expect(best.map((p) => p[0])).toEqual(["2026-10-05 10:30:00", "2026-10-06 07:00:00"]);
+    expect(best[0][1]).toBeCloseTo(111.3, 6); // 106p ex VAT
+    expect(best[1][1]).toBeCloseTo(114.45, 6); // 109p ex VAT
   });
 
   it("prices a litre all in from the total", () => {
-    // Western Fuel 2026-10-05: £560.26 for 500 L incl. £12 fee and VAT.
+    // Western Fuel 2026-10-05: Â£560.26 for 500 L incl. Â£12 fee and VAT.
     expect(allInPpl({ total_inc_vat: 560.26, litres: 500 })).toBeCloseTo(112.05, 2);
     expect(allInPpl({ total_inc_vat: null, litres: 500 })).toBeNull();
     expect(allInPpl({ total_inc_vat: 560.26, litres: 0 })).toBeNull();

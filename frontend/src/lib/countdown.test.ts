@@ -54,6 +54,7 @@ const summary = (o: Partial<BuyingSummary> = {}): BuyingSummary => ({
   best: {
     supplier: "homefuelsdirect",
     total_inc_vat: 577.71,
+    ppl: 115.54,
     ppl_effective: 110,
     delivery_label: "Standard",
     fetched_at: "2026-10-05 08:00:00",
@@ -142,12 +143,12 @@ describe("stateSentence", () => {
   const opts = { minOrderL: 500, today: "2026-10-05" };
   it("wait explains the price against the trigger", () => {
     expect(stateSentence("wait", summary(), opts)).toBe(
-      "Price 110.0p (Home Fuels Direct, £577.71) is above your 95.0p trigger.",
+      "Price 115.5p (Home Fuels Direct, £577.71) is above your 95.0p trigger.",
     );
   });
   it("wait with the price at or below the trigger stays neutral", () => {
     for (const ppl of [95, 94]) {
-      const s = summary({ best: { ...summary().best!, ppl_effective: ppl } });
+      const s = summary({ best: { ...summary().best!, ppl } });
       const text = stateSentence("wait", s, opts);
       expect(text).not.toContain("above");
       expect(text).toBe(
@@ -160,8 +161,12 @@ describe("stateSentence", () => {
       "No local quote yet. Your trigger is 95.0p.",
     );
   });
+  it("falls back to the ex VAT price with VAT added when ppl is missing", () => {
+    const s = summary({ best: { ...summary().best!, ppl: undefined } });
+    expect(stateSentence("wait", s, opts)).toContain("Price 115.5p");
+  });
   it("buy_now", () => {
-    const s = summary({ best: { ...summary().best!, ppl_effective: 94 } });
+    const s = summary({ best: { ...summary().best!, ppl: 94 } });
     expect(stateSentence("buy_now", s, opts)).toBe(
       "Price 94.0p is at or below your 95.0p trigger. A good time to order.",
     );
@@ -307,12 +312,13 @@ describe("priceSummary", () => {
       q({ fetched_at: "2026-10-04 08:00:00", ppl_effective: 110 }),
       q({ fetched_at: "2026-10-04 08:00:00", ppl_effective: 90, urgent: 1 }),
     ];
+    // Real prices: ex VAT figures with VAT added.
     expect(priceSummary(rows)).toEqual({
-      latestBest: 110,
-      latestIndex: 104,
-      firstBest: 112,
+      latestBest: 115.5,
+      latestIndex: 109.2,
+      firstBest: 117.60000000000001,
       firstDate: "2026-10-01 08:00:00",
-      change: -2,
+      change: -2.1,
     });
   });
   it("copes with no data", () => {

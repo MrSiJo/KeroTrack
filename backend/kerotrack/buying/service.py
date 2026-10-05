@@ -29,7 +29,7 @@ from kerotrack.models.reading import Reading, trusted_readings_clause
 from kerotrack.models.runway_projection import RunwayProjection
 from kerotrack.notifier.send import send
 from kerotrack.projection.service import NORMAL, persist_projection, project
-from kerotrack.quotes.models import QuoteRequest
+from kerotrack.quotes.models import QuoteRequest, all_in_ppl
 from kerotrack.quotes.registry import poll, select_providers
 from kerotrack.quotes.store import best_recent, latest_per_supplier, save_index, save_poll
 from kerotrack.settings.service import SettingsService
@@ -149,6 +149,13 @@ async def _best_latest(sf: async_sessionmaker, now: datetime) -> PriceQuote | No
     return _best_of_poll(await latest_per_supplier(sf, now=now, max_age_h=FRESH_HOURS), now)
 
 
+def _row_all_in(row: PriceQuote | None) -> float | None:
+    """All in pence per litre for a stored quote row, or None."""
+    if row is None or row.total_inc_vat is None or not row.litres:
+        return None
+    return all_in_ppl(row.total_inc_vat, row.litres)
+
+
 def _alert_body(payload: dict[str, Any]) -> str:
     def money(v: float | None) -> str:
         return f"£{v:.2f}" if v is not None else "n/a"
@@ -161,7 +168,7 @@ def _alert_body(payload: dict[str, Any]) -> str:
         [
             f"**Best supplier:** {payload['best_supplier'] or 'none'}",
             f"**Total (inc VAT):** {money(payload['best_total'])}",
-            f"**Effective price:** {ppl(payload['best_ppl_effective'])} per litre ex VAT",
+            f"**Price per litre:** {ppl(payload['best_ppl'])} (VAT, delivery and fees included)",
             f"**Order by:** {payload['order_by'] or 'n/a'}",
             f"**Headroom:** {f'{headroom:.0f} L' if headroom is not None else 'n/a'}",
         ]
@@ -262,7 +269,7 @@ async def run_buying(
                     order_by=order_by,
                     warn_days=int(await svc.get("buying.warn_days")),
                     trigger_ppl=trigger if trigger is not None else 0.0,
-                    best_ppl_effective=best.ppl_effective if best is not None else None,
+                    best_ppl=_row_all_in(best),
                     has_index=await _has_fresh_index(sf, now),
                 )
             )
@@ -273,6 +280,9 @@ async def run_buying(
         "state": state,
         "best_total": _round(best.total_inc_vat, 2) if best is not None else None,
         "best_supplier": best.supplier if best is not None else None,
+        # All in (VAT, delivery, fees): the trigger's basis.
+        "best_ppl": _round(_row_all_in(best), 2),
+        # Ex VAT, kept for existing MQTT consumers.
         "best_ppl_effective": _round(best.ppl_effective, 2) if best is not None else None,
         "trigger_ppl": trigger,
         "headroom_l": _round(headroom, 1),
@@ -367,14 +377,15 @@ async def _index_percentile(
 
 
 def _spread_today(rows: list[PriceQuote], now: datetime) -> float | None:
-    """Gap in effective ppl between the cheapest and dearest supplier today."""
+    """Gap in all in ppl between the cheapest and dearest supplier today."""
     today = now.strftime("%Y-%m-%d")
     per_supplier: dict[str, float] = {}
     for r in rows:
-        if r.ok != 1 or r.urgent or r.ppl_effective is None or not r.fetched_at.startswith(today):
+        value = _row_all_in(r)
+        if r.ok != 1 or r.urgent or value is None or not r.fetched_at.startswith(today):
             continue
         cur = per_supplier.get(r.supplier)
-        per_supplier[r.supplier] = r.ppl_effective if cur is None else min(cur, r.ppl_effective)
+        per_supplier[r.supplier] = value if cur is None else min(cur, value)
     if len(per_supplier) < 2:
         return None
     return round(max(per_supplier.values()) - min(per_supplier.values()), 2)
@@ -427,6 +438,7 @@ async def build_summary(sf: async_sessionmaker, svc: SettingsService, *, now: da
         {
             "supplier": best.supplier,
             "total_inc_vat": best.total_inc_vat,
+            "ppl": _round(_row_all_in(best), 2),
             "ppl_effective": _round(best.ppl_effective, 2),
             "delivery_label": best.delivery_label,
             "fetched_at": best.fetched_at,
@@ -442,12 +454,10 @@ async def build_summary(sf: async_sessionmaker, svc: SettingsService, *, now: da
     month_ago = await best_recent(
         sf, now=month_ago_at, max_age_h=FRESH_HOURS, until=month_ago_at
     )
+    recent_ppl, month_ago_ppl = _row_all_in(recent), _row_all_in(month_ago)
     best_change = (
-        round(recent.ppl_effective - month_ago.ppl_effective, 2)
-        if recent is not None
-        and month_ago is not None
-        and recent.ppl_effective is not None
-        and month_ago.ppl_effective is not None
+        round(recent_ppl - month_ago_ppl, 2)
+        if recent_ppl is not None and month_ago_ppl is not None
         else None
     )
 

@@ -19,7 +19,9 @@ class SignalInputs:
     order_by: date | None
     warn_days: int
     trigger_ppl: float
-    best_ppl_effective: float | None
+    # All in pence per litre (VAT, delivery and fees included), the same
+    # basis as the trigger.
+    best_ppl: float | None
     has_index: bool
 
 
@@ -51,13 +53,13 @@ def compute_state(inp: SignalInputs) -> str:
     # 4. buy_now: trigger > 0 and best not None and best <= trigger
     if (
         inp.trigger_ppl > 0
-        and inp.best_ppl_effective is not None
-        and inp.best_ppl_effective <= inp.trigger_ppl
+        and inp.best_ppl is not None
+        and inp.best_ppl <= inp.trigger_ppl
     ):
         return "buy_now"
 
     # 5. wait: best not None or has_index
-    if inp.best_ppl_effective is not None or inp.has_index:
+    if inp.best_ppl is not None or inp.has_index:
         return "wait"
 
     # 6. unknown (else)

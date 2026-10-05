@@ -154,6 +154,8 @@ export type BuyingSummary = {
   best: {
     supplier: string;
     total_inc_vat: number;
+    /** All in pence per litre (VAT, delivery, fees): the trigger's basis. */
+    ppl?: number | null;
     ppl_effective: number;
     delivery_label: string | null;
     fetched_at: string;

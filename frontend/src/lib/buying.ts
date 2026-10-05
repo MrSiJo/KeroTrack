@@ -80,6 +80,18 @@ export function allInPpl(q: Pick<BuyingQuote, "total_inc_vat" | "litres">): numb
   return (q.total_inc_vat / q.litres) * 100;
 }
 
+/** UK domestic heating oil VAT rate. */
+export const VAT_RATE = 0.05;
+
+/**
+ * Ex VAT pence per litre to the real price (VAT added). A quote's ex VAT
+ * figure already includes its fees, so this gives its all in price; the
+ * national index is published ex VAT, so this puts it on the same basis.
+ */
+export function withVat(ppl: number): number {
+  return ppl * (1 + VAT_RATE);
+}
+
 /** Local `YYYY-MM-DD` for a Date. */
 export function isoToday(d: Date = new Date()): string {
   const p = (n: number) => String(n).padStart(2, "0");
@@ -125,7 +137,8 @@ export function latestQuotes(quotes: BuyingQuote[]): BuyingQuote[] {
 }
 
 /**
- * Index line and best non-urgent ok quote per day, for the price chart.
+ * Index line and best non-urgent ok quote per day, for the price chart, in
+ * real pence per litre (VAT and fees included, like the trigger).
  *
  * Suppliers poll at different times of day, so one fetch holds only some of
  * them; the daily best compares them all. Each point sits at the fetch time
@@ -139,13 +152,13 @@ export function priceHistory(quotes: BuyingQuote[]): {
   const bestByDay = new Map<string, [string, number]>();
   for (const q of quotes) {
     if (q.ppl_effective == null) continue;
+    const ppl = withVat(q.ppl_effective);
     if (q.kind === "index") {
-      index.push([q.fetched_at, q.ppl_effective]);
+      index.push([q.fetched_at, ppl]);
     } else if (q.kind === "quote" && !q.urgent && q.ok) {
       const day = q.fetched_at.slice(0, 10);
       const cur = bestByDay.get(day);
-      if (cur === undefined || q.ppl_effective < cur[1])
-        bestByDay.set(day, [q.fetched_at, q.ppl_effective]);
+      if (cur === undefined || ppl < cur[1]) bestByDay.set(day, [q.fetched_at, ppl]);
     }
   }
   index.sort((a, b) => a[0].localeCompare(b[0]));

@@ -488,7 +488,8 @@ def _entries() -> list[SettingDef]:
             "buying",
             "Buy trigger (pence per litre)",
             0.0,
-            "Recommend buying when the price drops to this level. 0 disables.",
+            "Recommend buying when the real price per litre (VAT, delivery and "
+            "fees included) drops to this level. 0 disables.",
         ),
         SettingDef(
             "buying.safe_fill_pct",

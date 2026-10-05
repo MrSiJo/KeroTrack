@@ -84,7 +84,7 @@
   let enough = $derived(hasEnoughHistory(history, MIN_CHART_DAYS));
   let days = $derived(quoteDayCount(history));
   let prices = $derived(priceSummary(history));
-  // Same basis as the price history: best ok non urgent quote of the latest poll.
+  // Same basis as the price history: the day's best real price per litre.
   let todayBest = $derived(prices.latestBest);
 </script>
 
@@ -148,7 +148,7 @@
               <tr>
                 <th class="px-3 py-2">Supplier</th>
                 <th class="px-3 py-2 text-right" title="Total divided by litres: VAT, delivery and fees included">Per litre</th>
-                <th class="px-3 py-2 text-right" title="Per litre with fees included but VAT removed; the buy trigger uses this">Ex VAT</th>
+                <th class="px-3 py-2 text-right" title="Per litre with fees included but VAT removed">Ex VAT</th>
                 <th class="px-3 py-2">Delivery</th>
                 <th class="px-3 py-2 text-right">Fees</th>
                 <th class="px-3 py-2 text-right">Total</th>
@@ -188,7 +188,7 @@
         </div>
         <p class="mt-1 text-xs text-text-subtle">
           One row per supplier, using its standard delivery. Faster windows cost more.
-          Total and Per litre include VAT, delivery and any service fee; Ex VAT is the same price without VAT, which the buy trigger uses.
+          Total and Per litre include VAT, delivery and any service fee, and the buy trigger uses Per litre. Ex VAT is the same price without VAT.
         </p>
       {/if}
     </section>
@@ -202,11 +202,11 @@
         <div class="rounded-lg border border-border bg-bg-panel p-4 text-sm text-text-muted">
           <ul class="space-y-1">
             <li>
-              Today's best effective price:
+              Today's best price per litre:
               <span class="font-mono text-text">{formatPpl(todayBest)}</span>
             </li>
             <li>
-              National index:
+              National index (VAT added, before supplier fees):
               <span class="font-mono text-text">{formatPpl(prices.latestIndex)}</span>
             </li>
             <li>

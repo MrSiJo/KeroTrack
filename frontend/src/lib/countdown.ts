@@ -2,7 +2,7 @@
 // Everything date related here is derived from the runway in
 // GET /api/buying/summary (active scenario, falling back to "normal").
 
-import { daysUntil, fixed, formatGBP, formatPpl, latestQuotes, priceHistory, supplierName } from "$lib/buying";
+import { daysUntil, fixed, formatGBP, formatPpl, latestQuotes, priceHistory, supplierName, withVat } from "$lib/buying";
 import type { BuyingQuote, BuyingScenario, BuyingSummary } from "$lib/types/api";
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -78,9 +78,11 @@ export function stateSentence(
   const trigger = summary?.trigger_ppl ?? null;
   const hasTrigger = typeof trigger === "number" && trigger > 0;
   const best = summary?.best ?? null;
+  // The real price per litre (VAT, delivery and fees), as the trigger uses.
+  const price = best ? (best.ppl ?? withVat(best.ppl_effective)) : null;
   switch (state) {
     case "buy_now":
-      return `Price ${formatPpl(best?.ppl_effective)} is at or below your ${formatPpl(trigger)} trigger. A good time to order.`;
+      return `Price ${formatPpl(price)} is at or below your ${formatPpl(trigger)} trigger. A good time to order.`;
     case "deadline": {
       const n = daysUntil(activeScenario(summary)?.order_by, opts.today);
       if (n === null) return "Order soon.";
@@ -94,9 +96,9 @@ export function stateSentence(
     case "wait":
       if (!hasTrigger) return "No price trigger set (Settings > buying).";
       if (!best) return `No local quote yet. Your trigger is ${formatPpl(trigger)}.`;
-      return best.ppl_effective > (trigger as number)
-        ? `Price ${formatPpl(best.ppl_effective)} (${supplierName(best.supplier)}, ${formatGBP(best.total_inc_vat)}) is above your ${formatPpl(trigger)} trigger.`
-        : `Price ${formatPpl(best.ppl_effective)} (${supplierName(best.supplier)}, ${formatGBP(best.total_inc_vat)}) against your ${formatPpl(trigger)} trigger.`;
+      return (price as number) > (trigger as number)
+        ? `Price ${formatPpl(price)} (${supplierName(best.supplier)}, ${formatGBP(best.total_inc_vat)}) is above your ${formatPpl(trigger)} trigger.`
+        : `Price ${formatPpl(price)} (${supplierName(best.supplier)}, ${formatGBP(best.total_inc_vat)}) against your ${formatPpl(trigger)} trigger.`;
     default:
       return "No fresh prices yet.";
   }

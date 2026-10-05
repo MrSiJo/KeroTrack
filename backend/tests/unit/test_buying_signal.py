@@ -21,7 +21,7 @@ def _i(**kw):
         order_by=date(2027, 1, 20),
         warn_days=14,
         trigger_ppl=95.0,
-        best_ppl_effective=110.0,
+        best_ppl=110.0,
         has_index=True,
     )
     base.update(kw)
@@ -34,12 +34,12 @@ def _i(**kw):
         (dict(headroom_l=400), "no_room"),
         (dict(order_by=date(2026, 10, 1)), "overdue"),
         (dict(order_by=date(2026, 10, 19)), "deadline"),
-        (dict(best_ppl_effective=94.0), "buy_now"),
-        (dict(trigger_ppl=0.0, best_ppl_effective=50.0), "wait"),
+        (dict(best_ppl=94.0), "buy_now"),
+        (dict(trigger_ppl=0.0, best_ppl=50.0), "wait"),
         (dict(), "wait"),
-        (dict(best_ppl_effective=None, has_index=False), "unknown"),
+        (dict(best_ppl=None, has_index=False), "unknown"),
         (dict(headroom_l=400, order_by=date(2026, 10, 1)), "no_room"),
-        (dict(order_by=None, best_ppl_effective=None, has_index=True), "wait"),
+        (dict(order_by=None, best_ppl=None, has_index=True), "wait"),
     ],
 )
 def test_states(kw, state):

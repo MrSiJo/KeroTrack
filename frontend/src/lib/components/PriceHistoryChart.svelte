@@ -47,7 +47,7 @@
       legend: { top: 4, right: 12 },
       grid: { top: 40, right: 24, bottom: 36, left: 56 },
       xAxis: { type: "time" },
-      yAxis: { type: "value", name: "Pence per litre", scale: true },
+      yAxis: { type: "value", name: "Pence per litre (inc VAT)", scale: true },
       series: [
         {
           name: "National index",
