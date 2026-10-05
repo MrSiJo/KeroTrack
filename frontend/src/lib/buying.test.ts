@@ -72,6 +72,10 @@ describe("buying helpers", () => {
   it("names suppliers", () => {
     expect(supplierName("homefuelsdirect")).toBe("Home Fuels Direct");
     expect(supplierName("other")).toBe("other");
+    expect(supplierName("theheatingoilcompany")).toBe("The Heating Oil Company");
+    expect(supplierName("nwffuels")).toBe("NWF Fuels");
+    expect(supplierName("westernfuel")).toBe("Western Fuel");
+    expect(supplierName("boilerjuice")).toBe("BoilerJuice");
   });
 
   it("formats age", () => {

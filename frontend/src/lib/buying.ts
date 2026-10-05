@@ -61,6 +61,10 @@ export function daysUntil(
 
 const SUPPLIERS: Record<string, string> = {
   homefuelsdirect: "Home Fuels Direct",
+  theheatingoilcompany: "The Heating Oil Company",
+  nwffuels: "NWF Fuels",
+  westernfuel: "Western Fuel",
+  boilerjuice: "BoilerJuice",
 };
 
 export function supplierName(key: string): string {
