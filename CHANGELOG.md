@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.4.0](https://github.com/MrSiJo/KeroTrack/compare/v1.3.0...v1.4.0) (2026-10-05)
+
+
+### Features
+
+* **buying:** add a hedged guide to when the price trigger might be reached ([fc544b7](https://github.com/MrSiJo/KeroTrack/commit/fc544b72379b24f36aa66bd4f09859a593e9e28e))
+* **buying:** compare the buy trigger with the real price per litre ([d9b1305](https://github.com/MrSiJo/KeroTrack/commit/d9b13050c1a0ca8ecd52fa458a59b8b23be1efac))
+* **forecast:** draw a dotted usage trend through sensor glitches ([7848a74](https://github.com/MrSiJo/KeroTrack/commit/7848a743d6ce106b5def7df3ad4854ed5cc049b6))
+* **forecast:** drive the usage trend from the Nest heating model ([2c3046b](https://github.com/MrSiJo/KeroTrack/commit/2c3046b4782680544551c4e8721c72fbf10e1661))
+* **quotes:** add The Heating Oil Company, NWF, Western Fuel and BoilerJuice quotes ([8a1dbc7](https://github.com/MrSiJo/KeroTrack/commit/8a1dbc75dbf4bd40a884ace00fcec5de15251279))
+* **ui:** name the new quote suppliers on the Buying page ([62666d3](https://github.com/MrSiJo/KeroTrack/commit/62666d3323ea214daf932016993f942459dbaad9))
+* **ui:** reorder the Buying quotes table to read towards the total ([9320c86](https://github.com/MrSiJo/KeroTrack/commit/9320c869be3078f2bd8fd977c874fa483bbf5f0d))
+* **ui:** show the all in price per litre on the Buying quotes table ([511bc97](https://github.com/MrSiJo/KeroTrack/commit/511bc97f0bf7c39ceaf046b9fbc327195d45fdcb))
+
+
+### Bug Fixes
+
+* **buying:** keep the all in best price to 4 decimals ([02964af](https://github.com/MrSiJo/KeroTrack/commit/02964af8126b7a63a0dd04f2bab82bdfb4cf60a7))
+* **quotes:** label The Heating Oil Company's headline offer "Standard" ([f76e37d](https://github.com/MrSiJo/KeroTrack/commit/f76e37dcf252629e5426e70dff3a6a16b867d0ee))
+* **quotes:** poll suppliers concurrently, never retry email suppliers, chart best per day ([8f74478](https://github.com/MrSiJo/KeroTrack/commit/8f74478aae8908a711f556054fbbe586f02cd738))
+
 ## [1.3.0](https://github.com/MrSiJo/KeroTrack/compare/v1.2.0...v1.3.0) (2026-10-05)
 
 
