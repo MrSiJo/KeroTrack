@@ -15,11 +15,18 @@ from kerotrack.models.reading import Reading
 from kerotrack.models.refill_period import RefillPeriod
 
 
-pytestmark = pytest.mark.asyncio
 
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "v1_sample.db"
 SAMPLE_CONFIG = Path(__file__).resolve().parents[1] / "fixtures" / "v1_config.yaml"
+
+# v1_sample.db is derived from real v1 data, so *.db in .gitignore keeps it out
+# of this public repo. Where it is absent (CI, fresh clones) these tests skip;
+# they still run on a checkout that has it (scripts/build-fixture.py).
+pytestmark = [
+    pytest.mark.asyncio,
+    pytest.mark.skipif(not FIXTURE.exists(), reason="v1_sample.db fixture not present (kept out of git)"),
+]
 
 
 @pytest.fixture(autouse=True, scope="module")
