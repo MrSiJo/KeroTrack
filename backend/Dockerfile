@@ -1,5 +1,9 @@
 FROM python:3.12-slim
 
+# The docker host's weekly prune keeps only keep=true images; the update
+# watchers must never replace a CI built image.
+LABEL keep="true" wud.watch="false" com.centurylinklabs.watchtower.enable="false"
+
 ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     TZ=Europe/London

@@ -1,0 +1,95 @@
+# KeroTrack PRODUCTION stack on docker-host. Source of truth for
+# /dockerdata/compose-stacks/kerotrack/compose.yaml on the host.
+#
+# A push to main on Forgejo IS the deploy: .forgejo/workflows/deploy.yml runs
+# the tests, then the host's ci-deploy (`kerotrack` block, deploy/ci-deploy-block.sh)
+# builds kerotrack-api:main-<sha7> and kerotrack-ui:main-<sha7> from that
+# commit, re-pins the two image lines below and brings up only backend and
+# frontend. ci-deploy does NOT copy this file to the host: any other change
+# here is made by hand there too, after `cp compose.yaml compose.yaml.bak-<ts>`.
+#
+# The repo root compose.yaml (ghcr images, release-please builds on GitHub)
+# stays for anyone else running KeroTrack; production does not use it.
+#
+# Files on the host:
+#   /dockerdata/kerotrack/.env   0600: APP_SECRET_KEY (session signing key:
+#                                never regenerate, it logs everyone out) and
+#                                the other bootstrap keys in .env.example
+#   /dockerdata/kerotrack/data   the SQLite DB (kerotrack.db), bind backed
+#   /dockerdata/kerotrack/logs   app logs, bind backed
+#
+# Project, network and volumes: same project name (kerotrack-v2), service
+# names, container names, ports and network as the laptop deploys before the
+# CI cutover. The network and both volumes are `external` with pinned names,
+# so compose only ever attaches to the existing ones: it never creates an
+# empty volume, and never creates or recreates a network (the daemon's
+# default address pools are exhausted). If one is missing, `up` fails loudly.
+# The volumes are local volumes bind backed by /dockerdata/kerotrack/{data,logs}
+# (driver_opts type none, o bind), created by the old compose.override.yaml.
+
+name: kerotrack-v2
+
+services:
+  backend:
+    image: kerotrack-api:main-0000000
+    pull_policy: never
+    container_name: kerotrack-api
+    restart: unless-stopped
+    env_file: /dockerdata/kerotrack/.env
+    environment:
+      # The value the old compose defaulted to. Widen only per the note in
+      # the repo root compose.yaml (frontend container IP or network CIDR).
+      FORWARDED_ALLOW_IPS: "127.0.0.1"
+    ports:
+      - "9176:9176"
+    volumes:
+      - kerotrack-data:/app/data
+      - kerotrack-logs:/app/logs
+    networks:
+      - kerotrack-net
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:9176/api/health"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+    labels:
+      wud.watch: "false"
+      com.centurylinklabs.watchtower.enable: "false"
+
+  frontend:
+    image: kerotrack-ui:main-0000000
+    pull_policy: never
+    container_name: kerotrack-ui
+    restart: unless-stopped
+    ports:
+      - "9177:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - kerotrack-net
+    healthcheck:
+      # 127.0.0.1, not localhost: busybox wget prefers ::1 and nginx listens
+      # IPv4 only.
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    labels:
+      wud.watch: "false"
+      com.centurylinklabs.watchtower.enable: "false"
+
+volumes:
+  kerotrack-data:
+    external: true
+    name: kerotrack-v2_kerotrack-data
+  kerotrack-logs:
+    external: true
+    name: kerotrack-v2_kerotrack-logs
+
+networks:
+  kerotrack-net:
+    external: true
+    name: kerotrack-v2_kerotrack-net

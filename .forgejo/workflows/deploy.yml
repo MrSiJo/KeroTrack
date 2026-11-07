@@ -1,0 +1,35 @@
+# Deploy KeroTrack PRODUCTION on every push to main (and from the Run workflow
+# button). Runs the tests, then asks the docker host's ci-deploy to deploy this
+# commit. The CI key can do nothing else there (forced command); ci-deploy
+# only deploys the current tip of main, skips a run overtaken by a newer push,
+# snapshots the DB first, and rolls back if a health check fails.
+# A push that only touches docs/ or *.md deploys nothing.
+# The GitHub workflows (release-please, ghcr images) are separate and unchanged.
+# Template: simon/ci-deploy templates/deploy.yml.
+name: deploy
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**', '**/*.md']
+  workflow_dispatch:
+
+jobs:
+  tests:
+    uses: ./.forgejo/workflows/ci.yml
+
+  deploy:
+    needs: tests
+    runs-on: docker
+    container:
+      image: node:22-bookworm
+    steps:
+      - name: Deploy ${{ github.sha }}
+        env:
+          KEY: ${{ secrets.CI_DEPLOY_KEY }}
+        run: |
+          [ "${{ github.ref }}" = "refs/heads/main" ] || { echo "deploy runs from main only"; exit 1; }
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519 && chmod 600 ~/.ssh/id_ed25519
+          echo "${{ vars.CI_DEPLOY_HOST_KEY }}" > ~/.ssh/known_hosts
+          ssh -o StrictHostKeyChecking=yes -o BatchMode=yes root@${{ vars.CI_DEPLOY_HOST }} "kerotrack ${{ github.sha }}"

@@ -109,10 +109,26 @@ pre-commit run --hook-stage manual security-invariants
 
 ## Deploy ritual
 
-After backend or frontend changes: commit → push → `docker compose up` on
-the deploy host (set via the developer's local Docker context) → `curl
-/api/health` to verify. Required for every change that ships. The exact
-host address lives in the developer's local config, not in the repo.
+Production deploys from Forgejo CI: a push to `main` on Forgejo runs
+`.forgejo/workflows/deploy.yml` (backend pytest and ruff S rules, frontend
+check, test and build), then the docker host's `ci-deploy kerotrack <sha>`
+builds `kerotrack-api:main-<sha7>` and `kerotrack-ui:main-<sha7>` there,
+snapshots the SQLite DB into `ci-backups/` in the data volume, re-pins and
+recreates `backend` and `frontend`, health checks, and rolls back on failure.
+Pushes that only touch `docs/` or `*.md` deploy nothing.
+
+* The host stack is `deploy/compose.yaml` (project `kerotrack-v2`, external
+  network and volumes, so nothing is ever created). ci-deploy never copies
+  it: change it by hand on the host too.
+* The `kerotrack)` block for ci-deploy's `case` lives in
+  `deploy/ci-deploy-block.sh` (master copy in simon/ci-deploy).
+* The repo root `compose.yaml` and the GitHub workflows (release-please,
+  ghcr images) stay for public users; production no longer pulls ghcr.
+* Never `docker compose up` the root compose against the deploy host: it
+  would put the ghcr images back over the CI build.
+
+Verify with `curl /api/health` and the CI log. The host address lives in the
+developer's local config and the Forgejo variables, not in the repo.
 
 ## Tests
 
@@ -136,6 +152,11 @@ Every non-trivial change follows the same ritual. Do not skip steps because a ch
 7. **Ship it properly.** Conventional commit messages, push to `origin/main`, and where the repo has GitHub Actions (public images / release-please), confirm the runs go green.
 
 ## Deployment: deliberately NOT Dockge-managed
+
+Update 2026-11-07: the host compose now lives at
+`/dockerdata/compose-stacks/kerotrack/` for CI (see Deploy ritual), with
+`deploy/compose.yaml` in this repo as its source of truth. The reasoning
+below still holds: it is never edited in Dockge, and the repo copy wins.
 
 Decided 2026-07-26, when the homelab Docker hosts standardised their Dockge
 stacks on one directory. The Track apps were **deliberately excluded** from

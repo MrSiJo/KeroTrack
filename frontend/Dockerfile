@@ -8,6 +8,9 @@ COPY . .
 RUN npm run build
 
 FROM nginx:alpine
+# The docker host's weekly prune keeps only keep=true images; the update
+# watchers must never replace a CI built image.
+LABEL keep="true" wud.watch="false" com.centurylinklabs.watchtower.enable="false"
 COPY --from=builder /app/build /usr/share/nginx/html
 COPY nginx-frontend.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
